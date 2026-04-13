@@ -4,11 +4,16 @@
  * data-vd-main="true" — force main directory (show search/filters) even if a parent has data-fixed-insurance.
  * Insurance SEO: data-fixed-insurance="Anthem" OR URL /insurance/anthem → filter + hide controls (slug → "Anthem").
  * Fixed site header: data-vd-header-offset="96" (px) or "5rem" — top padding so controls aren’t under position:fixed nav (default 88px).
+ *
+ * API: each provider should include profileStatusRaw (DEFAULT | TRUE | FALSE). DEFAULT = editorial trust, no FreeBusy in accepting-new view.
+ * Warm cache from homepage: window.vedicRdPrefetchDefaults(apiBase, apiKey) — see Webflow footer instructions.
  */
 (function () {
   'use strict';
 
   var SLOT_WINDOW_DAYS = 21; // batch slots call per provider (Apps Script max window)
+  var PREFETCH_DEFAULTS_KEY = 'vedic_rd_prefetch_defaults_v1';
+  var PREFETCH_DEFAULTS_TTL_MS = 90000;
 
   var STYLES =
     ':root{--vd-bg:#F3F1E7;--vd-card:#FFFFFF;--vd-border:#e5e7eb;--vd-shadow:0 2px 8px rgba(0,0,0,.06);--vd-shadow-hover:0 6px 20px rgba(0,0,0,.12);--vd-text:#3E3E3E;--vd-muted:#6b7280;--vd-primary:#186AD0;--vd-primary-hover:#1557ab;--vd-accent:#D0A740}' +
@@ -69,6 +74,16 @@
     '.vd-card-pending-ring{width:28px;height:28px;border-radius:50%;border:2.5px solid rgba(24,106,208,.2);border-top-color:var(--vd-primary);animation:vd-spin .75s linear infinite;box-sizing:border-box}' +
     '@keyframes vd-spin{to{transform:rotate(360deg)}}' +
     '@media (prefers-reduced-motion:reduce){.vd-card-pending-ring{animation:none;border-color:rgba(24,106,208,.45);opacity:.85}}' +
+    '.vd-skeleton-card{pointer-events:none;opacity:.95}' +
+    '.vd-skel-avatar{width:120px;height:120px;border-radius:50%;background:linear-gradient(90deg,#eceae4,#f5f3ed,#eceae4);background-size:200% 100%;animation:vd-shimmer 1.15s ease-in-out infinite;margin:0 auto}' +
+    '.vd-skel-body{flex:1;min-width:0;padding-top:4px}' +
+    '.vd-skel-line{height:11px;border-radius:6px;background:linear-gradient(90deg,#eceae4,#f5f3ed,#eceae4);background-size:200% 100%;animation:vd-shimmer 1.15s ease-in-out infinite;margin:10px 0 0;max-width:100%}' +
+    '.vd-skel-line--lg{max-width:55%;height:16px;margin-top:0}' +
+    '.vd-skel-line--md{max-width:92%}' +
+    '.vd-skel-line--sm{max-width:70%}' +
+    '.vd-skel-line--btn{max-width:200px;height:44px;margin-top:22px;border-radius:12px}' +
+    '@keyframes vd-shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}' +
+    '@media (prefers-reduced-motion:reduce){.vd-skel-avatar,.vd-skel-line{animation:none;background:#e8e6e0}}' +
     '.vd-card-reveal{animation:vd-fade-in .35s ease forwards}' +
     '@keyframes vd-fade-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}' +
     '@media (max-width:720px){.vd-profile-card{padding:16px;gap:12px;flex-direction:row;flex-wrap:nowrap;align-items:flex-start}.vd-profile-left{flex:0 0 70px}.vd-profile-left img{width:70px;height:70px;border-width:2px}.vd-profile-right{flex:1;min-width:0}.vd-profile-name{font-size:1.1rem}.vd-line{font-size:.8rem}.vd-bio-text{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.vd-bio-text.vd-expanded{display:block;-webkit-line-clamp:unset;line-clamp:unset}.vd-bio-toggle{display:inline-block}.vd-tag-pill{padding:2px 6px;font-size:.6rem;border-radius:8px;border-width:1px;background:transparent}.vd-specialties-wrapper{margin-top:10px}.vd-actions{margin-top:14px;padding-top:14px;border-top-width:1px}.vd-btn{padding:12px 22px;font-size:1rem}#vedic-rd-directory #vd-loader{min-height:min(30vh,300px);padding:2.5rem 1.25rem 2rem}}' +
@@ -437,6 +452,36 @@
       });
     }
 
+    function readPrefetchDefaults() {
+      try {
+        var raw = sessionStorage.getItem(PREFETCH_DEFAULTS_KEY);
+        if (!raw) return null;
+        var o = JSON.parse(raw);
+        if (!o || !o.ts || Date.now() - o.ts > PREFETCH_DEFAULTS_TTL_MS) return null;
+        return Array.isArray(o.providers) && o.providers.length ? o.providers : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function showSkeletonGrid(n) {
+      n = Math.max(1, Math.min(12, n || 4));
+      var parts = [];
+      for (var i = 0; i < n; i++) {
+        parts.push(
+          '<div class="vd-profile-card vd-skeleton-card" aria-hidden="true">' +
+            '<div class="vd-profile-left"><div class="vd-skel-avatar"></div></div>' +
+            '<div class="vd-profile-right vd-skel-body">' +
+            '<div class="vd-skel-line vd-skel-line--lg"></div>' +
+            '<div class="vd-skel-line vd-skel-line--md"></div>' +
+            '<div class="vd-skel-line vd-skel-line--sm"></div>' +
+            '<div class="vd-skel-line vd-skel-line--btn"></div>' +
+            '</div></div>'
+        );
+      }
+      $grid.innerHTML = parts.join('');
+    }
+
     function loadProviders() {
       $status.textContent = '';
       $grid.innerHTML = '';
@@ -444,11 +489,21 @@
       hideMeetLoader();
 
       var acceptingYes = isInsuranceLanding || $accepting.value === 'yes';
+      var insVal = fixedIns || ($insurance && $insurance.value) || '';
+      var canUsePrefetch =
+        acceptingYes &&
+        !($search && $search.value) &&
+        !fixedSpec &&
+        !fixedTagVal &&
+        (isInsuranceLanding || !insVal);
+      var pref = canUsePrefetch ? readPrefetchDefaults() : null;
 
-      if (!acceptingYes) {
-        $status.textContent = 'Loading providers…';
+      if (pref && pref.length) {
+        render(sortProviders(pref), true);
+      } else if (acceptingYes) {
+        showSkeletonGrid(6);
       } else {
-        $status.textContent = 'Loading directory…';
+        showSkeletonGrid(4);
       }
 
       var params = {
@@ -458,10 +513,10 @@
         sort: 'name',
       };
       if ($search && $search.value) params.search = $search.value.trim();
-      var insVal = fixedIns || ($insurance && $insurance.value) || '';
       if (insVal) params.insurance = insVal;
       if (fixedSpec) params.specialty = fixedSpec;
       if (fixedTagVal) params.tag = fixedTagVal;
+      if (isInsuranceLanding && insVal) params.mergeDefaultProfiles = 'true';
 
       return api(params)
         .then(function (data) {
@@ -604,8 +659,11 @@
       return (full || '').split(' ')[0] || 'Provider';
     }
 
-    /** Sheet/API may send profile-status, profileStatus, or profile_status. DEFAULT = show in accepting-new flow without FreeBusy. */
+    /** profileStatusRaw from API (DEFAULT | TRUE | FALSE). DEFAULT = show in accepting-new flow without FreeBusy. */
     function getProfileStatus(p) {
+      if (p.profileStatusRaw != null && String(p.profileStatusRaw).trim() !== '') {
+        return String(p.profileStatusRaw).trim().toUpperCase();
+      }
       var s =
         p.profileStatus != null
           ? p.profileStatus
@@ -613,6 +671,7 @@
             ? p['profile-status']
             : p.profile_status;
       if (s == null || s === '') return '';
+      if (typeof s === 'boolean') return s ? 'TRUE' : 'FALSE';
       return String(s).trim().toUpperCase();
     }
 
@@ -822,6 +881,31 @@
       });
     }
   }
+
+  /** Homepage/footer: warm sessionStorage so Meet our dietitians can paint DEFAULT rows before the full providers response. */
+  window.vedicRdPrefetchDefaults = function (apiBase, apiKey) {
+    var base = apiBase && String(apiBase).trim();
+    if (!base) return;
+    var u =
+      base +
+      (base.indexOf('?') >= 0 ? '&' : '?') +
+      'mode=providers&surface=profile&activeOnly=true&sort=name&defaultOnly=true';
+    if (apiKey) u += '&key=' + encodeURIComponent(apiKey);
+    fetch(u, { credentials: 'omit' })
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (d) {
+        if (!d || !d.ok || !d.providers || !d.providers.length) return;
+        try {
+          sessionStorage.setItem(
+            PREFETCH_DEFAULTS_KEY,
+            JSON.stringify({ ts: Date.now(), providers: d.providers })
+          );
+        } catch (e) {}
+      })
+      .catch(function () {});
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', main);
