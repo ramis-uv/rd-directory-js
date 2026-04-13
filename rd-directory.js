@@ -63,6 +63,12 @@
     '@media (prefers-reduced-motion:reduce){#vedic-rd-directory .vd-loader-textwrap::after{animation:none;opacity:.45;background:linear-gradient(90deg,transparent,rgba(24,106,208,.35),transparent)}#vedic-rd-directory .vd-loader-headline{transition:opacity .2s ease}}' +
     '.vd-loader-hidden{display:none!important}' +
     '.vd-card-hidden{display:none!important}' +
+    '.vd-profile-card{position:relative}' +
+    '.vd-card-pending{position:absolute;inset:0;border-radius:16px;background:rgba(255,255,255,.72);backdrop-filter:saturate(1.1) blur(2px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:2;pointer-events:none}' +
+    '.vd-card-pending-text{font-size:.8125rem;font-weight:600;color:#4b5563;letter-spacing:.02em}' +
+    '.vd-card-pending-ring{width:28px;height:28px;border-radius:50%;border:2.5px solid rgba(24,106,208,.2);border-top-color:var(--vd-primary);animation:vd-spin .75s linear infinite;box-sizing:border-box}' +
+    '@keyframes vd-spin{to{transform:rotate(360deg)}}' +
+    '@media (prefers-reduced-motion:reduce){.vd-card-pending-ring{animation:none;border-color:rgba(24,106,208,.45);opacity:.85}}' +
     '.vd-card-reveal{animation:vd-fade-in .35s ease forwards}' +
     '@keyframes vd-fade-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}' +
     '@media (max-width:720px){.vd-profile-card{padding:16px;gap:12px;flex-direction:row;flex-wrap:nowrap;align-items:flex-start}.vd-profile-left{flex:0 0 70px}.vd-profile-left img{width:70px;height:70px;border-width:2px}.vd-profile-right{flex:1;min-width:0}.vd-profile-name{font-size:1.1rem}.vd-line{font-size:.8rem}.vd-bio-text{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.vd-bio-text.vd-expanded{display:block;-webkit-line-clamp:unset;line-clamp:unset}.vd-bio-toggle{display:inline-block}.vd-tag-pill{padding:2px 6px;font-size:.6rem;border-radius:8px;border-width:1px;background:transparent}.vd-specialties-wrapper{margin-top:10px}.vd-actions{margin-top:14px;padding-top:14px;border-top-width:1px}.vd-btn{padding:12px 22px;font-size:1rem}#vedic-rd-directory #vd-loader{min-height:min(30vh,300px);padding:2.5rem 1.25rem 2rem}}' +
@@ -442,7 +448,7 @@
       if (!acceptingYes) {
         $status.textContent = 'Loading providers…';
       } else {
-        showMeetLoader();
+        $status.textContent = 'Loading directory…';
       }
 
       var params = {
@@ -461,13 +467,10 @@
         .then(function (data) {
           if (!data.ok) throw new Error(data.error || 'Load failed');
 
-          if (acceptingYes) {
-            setLoaderPhaseSlots((data.providers || []).length);
-          }
-
           render(sortProviders(data.providers || []), acceptingYes);
 
           if (acceptingYes) {
+            $status.textContent = '';
             return applyAcceptingFilter();
           }
           $count.textContent = (data.total || 0) + ' dietitians found';
@@ -519,28 +522,72 @@
       var cards = [].slice.call($grid.querySelectorAll('.vd-profile-card'));
       if (!cards.length) {
         hideMeetLoader();
+        $count.textContent = '';
         $status.textContent = 'No matching providers.';
         return Promise.resolve();
       }
 
       var visible = 0;
+      var pendingSlotChecks = 0;
+
+      function updateAcceptingCount() {
+        if (pendingSlotChecks > 0) {
+          if (visible > 0) {
+            $count.textContent =
+              'Showing ' +
+              visible +
+              ' now \u00b7 checking openings for ' +
+              pendingSlotChecks +
+              ' more\u2026';
+          } else {
+            $count.textContent = 'Checking calendars for openings\u2026';
+          }
+        } else {
+          $count.textContent =
+            visible + ' dietitian' + (visible !== 1 ? 's' : '') + ' with openings soon';
+        }
+      }
+
+      cards.forEach(function (card) {
+        var ps = (card.getAttribute('data-profile-status') || '').trim().toUpperCase();
+        if (ps === 'DEFAULT') {
+          visible++;
+        }
+      });
+
+      var needSlots = cards.filter(function (card) {
+        return (card.getAttribute('data-profile-status') || '').trim().toUpperCase() !== 'DEFAULT';
+      });
+      pendingSlotChecks = needSlots.length;
+      updateAcceptingCount();
 
       return Promise.all(
         cards.map(function (card) {
+          var ps = (card.getAttribute('data-profile-status') || '').trim().toUpperCase();
+          if (ps === 'DEFAULT') {
+            return Promise.resolve();
+          }
           return providerHasOpenSlots(card.dataset.id || '', card.dataset.email || '').then(function (open) {
+            pendingSlotChecks = Math.max(0, pendingSlotChecks - 1);
+            removeCardPendingOverlay(card);
             if (open) {
               card.classList.remove('vd-card-hidden');
-              card.classList.add('vd-card-reveal');
               visible++;
-              $count.textContent =
-                visible + ' dietitian' + (visible !== 1 ? 's' : '') + ' with openings soon';
+            } else {
+              card.classList.add('vd-card-hidden');
             }
+            updateAcceptingCount();
           });
         })
       ).then(function () {
         hideMeetLoader();
+        pendingSlotChecks = 0;
         if (!visible) {
           $status.textContent = 'No providers are currently accepting new clients.';
+          $count.textContent = '';
+        } else {
+          $count.textContent =
+            visible + ' dietitian' + (visible !== 1 ? 's' : '') + ' with openings soon';
         }
       });
     }
@@ -557,7 +604,24 @@
       return (full || '').split(' ')[0] || 'Provider';
     }
 
-    function cardHtml(p) {
+    /** Sheet/API may send profile-status, profileStatus, or profile_status. DEFAULT = show in accepting-new flow without FreeBusy. */
+    function getProfileStatus(p) {
+      var s =
+        p.profileStatus != null
+          ? p.profileStatus
+          : p['profile-status'] != null
+            ? p['profile-status']
+            : p.profile_status;
+      if (s == null || s === '') return '';
+      return String(s).trim().toUpperCase();
+    }
+
+    function removeCardPendingOverlay(card) {
+      var o = card.querySelector('.vd-card-pending');
+      if (o) o.remove();
+    }
+
+    function cardHtml(p, acceptingMode) {
       var slug = String(p.slug || '').trim();
       var href = slug ? BOOK_PATH_PREFIX + '/' + encodeURIComponent(slug) : '#';
       var specs = (p.specialties || []).map(escapeHtml);
@@ -600,11 +664,20 @@
             '</span><button type="button" class="vd-more-spec">+More</button>'
           : '';
 
+      var st = getProfileStatus(p);
+      var needsSlotCheck = acceptingMode && st !== 'DEFAULT';
+      var pendingOverlay = needsSlotCheck
+        ? '<div class="vd-card-pending" role="status" aria-live="polite"><span class="vd-card-pending-ring" aria-hidden="true"></span><span class="vd-card-pending-text">Checking openings\u2026</span></div>'
+        : '';
+
       return (
-        '<div class="vd-profile-card vd-card-hidden" data-id="' +
+        '<div class="vd-profile-card' +
+        '" data-id="' +
         escapeAttr(p.id || '') +
         '" data-email="' +
         escapeAttr(p.email || '') +
+        '" data-profile-status="' +
+        escapeAttr(st) +
         '">' +
         '<div class="vd-profile-left"><img src="' +
         escapeAttr(p.photoUrl || '') +
@@ -630,19 +703,30 @@
         '" target="_self">Book with ' +
         escapeHtml(firstName(p.name || '')) +
         '</a></div>' +
-        '</div></div>'
+        '</div>' +
+        pendingOverlay +
+        '</div>'
       );
     }
 
     function render(list, acceptingMode) {
       $grid.innerHTML = list
         .map(function (p) {
-          return cardHtml(p);
+          return cardHtml(p, acceptingMode);
         })
         .join('');
       if (!acceptingMode) {
         [].slice.call($grid.querySelectorAll('.vd-profile-card')).forEach(function (el) {
           el.classList.remove('vd-card-hidden');
+          removeCardPendingOverlay(el);
+        });
+      } else {
+        [].slice.call($grid.querySelectorAll('.vd-profile-card')).forEach(function (el) {
+          var ps = (el.getAttribute('data-profile-status') || '').trim().toUpperCase();
+          el.classList.add('vd-card-reveal');
+          if (ps === 'DEFAULT') {
+            el.classList.remove('vd-card-hidden');
+          }
         });
       }
     }
