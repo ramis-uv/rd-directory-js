@@ -14,8 +14,10 @@
     '#vedic-rd-directory{--vd-bg:#F3F1E7;--vd-card:#FFFFFF;--vd-border:#e5e7eb;--vd-shadow:0 2px 8px rgba(0,0,0,.06);--vd-shadow-hover:0 6px 20px rgba(0,0,0,.12);--vd-text:#3E3E3E;--vd-muted:#6b7280;--vd-primary:#186AD0;--vd-primary-hover:#1557ab;--vd-accent:#D0A740}' +
     '.vd-embed-root{display:block;width:100%;max-width:100%;min-width:0;box-sizing:border-box;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}' +
     '.vd-controls{max-width:1100px;margin:16px auto 12px;padding:16px 20px;border:1px solid var(--vd-border);border-radius:12px;background:var(--vd-card);box-shadow:var(--vd-shadow);display:flex;flex-wrap:wrap;gap:.75rem;align-items:stretch;box-sizing:border-box}' +
-    '#vedic-rd-directory input.vd-search-input,#vedic-rd-directory .vd-controls input[type=search],#vedic-rd-directory #vd-search{display:block!important;visibility:visible!important;opacity:1!important;-webkit-appearance:textfield;appearance:auto;box-sizing:border-box;min-height:44px!important;flex:1 1 220px;max-width:100%;width:auto!important;min-width:0;border:1px solid var(--vd-border);border-radius:8px;padding:10px 14px;font-size:15px!important;line-height:1.3!important;color:var(--vd-text)!important;background:#fff!important}' +
-    '#vedic-rd-directory .vd-controls input[type=search]::placeholder{color:var(--vd-muted)}' +
+    '#vedic-rd-directory.vd-main-mode .vd-controls{display:flex!important;flex-wrap:wrap!important;visibility:visible!important;opacity:1!important;min-height:0}' +
+    '#vedic-rd-directory.vd-insurance-mode .vd-controls{display:none!important}' +
+    '#vedic-rd-directory input.vd-search-input,#vedic-rd-directory #vd-search{display:block!important;visibility:visible!important;opacity:1!important;-webkit-appearance:none;appearance:none;box-sizing:border-box;min-height:44px!important;flex:1 1 220px;max-width:100%;width:auto!important;min-width:120px!important;border:1px solid var(--vd-border);border-radius:8px;padding:10px 14px;font-size:15px!important;line-height:1.3!important;color:var(--vd-text)!important;background:#fff!important}' +
+    '#vedic-rd-directory input.vd-search-input::placeholder,#vedic-rd-directory #vd-search::placeholder{color:var(--vd-muted)}' +
     '.vd-controls select{border:1px solid var(--vd-border);border-radius:8px;padding:10px 14px;font-size:15px;flex:1 1 180px;min-height:44px;background:#fff;color:var(--vd-text);box-sizing:border-box}' +
     '.vd-grid{display:flex;flex-direction:column;gap:16px;max-width:1100px;margin:0 auto;width:100%;box-sizing:border-box;padding:0 0 24px}' +
     '.vd-profile-card{border:1px solid var(--vd-border);border-radius:16px;padding:28px;box-shadow:var(--vd-shadow);display:flex;gap:28px;flex-wrap:wrap;background:var(--vd-card);transition:box-shadow .3s ease;overflow:visible;box-sizing:border-box;min-width:0}' +
@@ -63,7 +65,7 @@
   var INNER_HTML =
     '<div class="vd-embed-root">' +
     '<div class="vd-controls">' +
-    '<input id="vd-search" class="vd-search-input" type="search" name="vd-search" autocomplete="off" placeholder="Search by name…" />' +
+    '<input id="vd-search" class="vd-search-input" type="text" name="vd-search" inputmode="search" autocomplete="off" placeholder="Search by name…" aria-label="Search by name" />' +
     '<select id="vd-insurance" aria-label="Insurance"><option value="">All insurances</option></select>' +
     '<select id="vd-accepting" aria-label="Accepting new clients">' +
     '<option value="yes">Accepting new clients: Yes</option>' +
@@ -179,7 +181,9 @@
     mount($root);
 
     var merged = mergeDirectoryConfig($root);
-    var forceMain = mainFlagTrue(merged.vdMain);
+    // Prefer raw attribute — some Webflow embed runtimes expose dataset inconsistently.
+    var forceMain =
+      mainFlagTrue($root.getAttribute('data-vd-main')) || mainFlagTrue(merged.vdMain);
 
     var pathSeg = pathInsuranceSegment();
     var fromPath = !forceMain && pathSeg ? slugToInsuranceLabel(pathSeg) : '';
@@ -195,23 +199,26 @@
 
     var isInsuranceLanding = !!fixedIns;
 
+    $root.classList.toggle('vd-main-mode', !isInsuranceLanding);
+    $root.classList.toggle('vd-insurance-mode', isInsuranceLanding);
+
     var ACTIVE_ONLY = true;
     var BOOK_PATH_PREFIX = '/dietitians';
 
-    var $grid = document.getElementById('vd-grid');
-    var $count = document.getElementById('vd-count');
-    var $status = document.getElementById('vd-status');
-    var $loader = document.getElementById('vd-loader');
-    var $loaderTitle = document.getElementById('vd-loader-title');
-    var $loaderSub = document.getElementById('vd-loader-sub');
-    var $search = document.getElementById('vd-search');
-    var $insurance = document.getElementById('vd-insurance');
-    var $accepting = document.getElementById('vd-accepting');
+    var $grid = $root.querySelector('#vd-grid');
+    var $count = $root.querySelector('#vd-count');
+    var $status = $root.querySelector('#vd-status');
+    var $loader = $root.querySelector('#vd-loader');
+    var $loaderTitle = $root.querySelector('#vd-loader-title');
+    var $loaderSub = $root.querySelector('#vd-loader-sub');
+    var $search = $root.querySelector('#vd-search');
+    var $insurance = $root.querySelector('#vd-insurance');
+    var $accepting = $root.querySelector('#vd-accepting');
 
     if (!$grid || !$accepting) return;
 
+    var ctrlBar = $root.querySelector('.vd-controls');
     if (isInsuranceLanding) {
-      var ctrlBar = $root.querySelector('.vd-controls');
       if (ctrlBar) ctrlBar.style.display = 'none';
       if ($search) {
         $search.setAttribute('tabindex', '-1');
@@ -220,6 +227,22 @@
       if ($accepting) {
         $accepting.value = 'yes';
         $accepting.setAttribute('aria-hidden', 'true');
+      }
+    } else {
+      if (ctrlBar) {
+        ctrlBar.style.removeProperty('display');
+        ctrlBar.style.removeProperty('visibility');
+      }
+      if ($search) {
+        $search.style.display = '';
+        $search.style.removeProperty('display');
+        $search.style.visibility = '';
+        $search.removeAttribute('aria-hidden');
+        $search.removeAttribute('tabindex');
+      }
+      if ($accepting) {
+        $accepting.style.removeProperty('display');
+        $accepting.removeAttribute('aria-hidden');
       }
     }
 
