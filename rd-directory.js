@@ -1,7 +1,8 @@
 /**
  * Vedic Nutrition — RD directory (mounts into #vedic-rd-directory)
- * data-api-base, data-api-key, data-fixed-insurance, data-fixed-specialty, data-fixed-tag
- * Insurance landing (data-fixed-insurance): no search, no "accepting" dropdown — always accepting only.
+ * Config can live on #vedic-rd-directory OR any ancestor (Webflow wrapper / Section custom attrs).
+ * data-vd-main="true" — force main directory (show search/filters) even if a parent has data-fixed-insurance.
+ * Insurance SEO: data-fixed-insurance="Anthem" OR URL /insurance/anthem → filter + hide controls (slug → "Anthem").
  */
 (function () {
   'use strict';
@@ -13,7 +14,7 @@
     '#vedic-rd-directory{--vd-bg:#F3F1E7;--vd-card:#FFFFFF;--vd-border:#e5e7eb;--vd-shadow:0 2px 8px rgba(0,0,0,.06);--vd-shadow-hover:0 6px 20px rgba(0,0,0,.12);--vd-text:#3E3E3E;--vd-muted:#6b7280;--vd-primary:#186AD0;--vd-primary-hover:#1557ab;--vd-accent:#D0A740}' +
     '.vd-embed-root{display:block;width:100%;max-width:100%;min-width:0;box-sizing:border-box;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}' +
     '.vd-controls{max-width:1100px;margin:16px auto 12px;padding:16px 20px;border:1px solid var(--vd-border);border-radius:12px;background:var(--vd-card);box-shadow:var(--vd-shadow);display:flex;flex-wrap:wrap;gap:.75rem;align-items:stretch;box-sizing:border-box}' +
-    '#vedic-rd-directory .vd-controls input[type=search],#vedic-rd-directory #vd-search{display:block!important;visibility:visible!important;opacity:1!important;-webkit-appearance:textfield;appearance:auto;box-sizing:border-box;min-height:44px;flex:1 1 220px;max-width:100%;width:auto;border:1px solid var(--vd-border);border-radius:8px;padding:10px 14px;font-size:15px;color:var(--vd-text);background:#fff}' +
+    '#vedic-rd-directory input.vd-search-input,#vedic-rd-directory .vd-controls input[type=search],#vedic-rd-directory #vd-search{display:block!important;visibility:visible!important;opacity:1!important;-webkit-appearance:textfield;appearance:auto;box-sizing:border-box;min-height:44px!important;flex:1 1 220px;max-width:100%;width:auto!important;min-width:0;border:1px solid var(--vd-border);border-radius:8px;padding:10px 14px;font-size:15px!important;line-height:1.3!important;color:var(--vd-text)!important;background:#fff!important}' +
     '#vedic-rd-directory .vd-controls input[type=search]::placeholder{color:var(--vd-muted)}' +
     '.vd-controls select{border:1px solid var(--vd-border);border-radius:8px;padding:10px 14px;font-size:15px;flex:1 1 180px;min-height:44px;background:#fff;color:var(--vd-text);box-sizing:border-box}' +
     '.vd-grid{display:flex;flex-direction:column;gap:16px;max-width:1100px;margin:0 auto;width:100%;box-sizing:border-box;padding:0 0 24px}' +
@@ -62,7 +63,7 @@
   var INNER_HTML =
     '<div class="vd-embed-root">' +
     '<div class="vd-controls">' +
-    '<input id="vd-search" type="search" name="vd-search" autocomplete="off" placeholder="Search by name…" />' +
+    '<input id="vd-search" class="vd-search-input" type="search" name="vd-search" autocomplete="off" placeholder="Search by name…" />' +
     '<select id="vd-insurance" aria-label="Insurance"><option value="">All insurances</option></select>' +
     '<select id="vd-accepting" aria-label="Accepting new clients">' +
     '<option value="yes">Accepting new clients: Yes</option>' +
@@ -98,31 +99,101 @@
     }
   }
 
+  /** Walk #vedic-rd-directory and ancestors — Webflow often puts CMS custom attrs on a wrapper, not on the mount id. */
+  function mergeDirectoryConfig(root) {
+    var out = {
+      apiBase: '',
+      apiKey: '',
+      fixedInsurance: '',
+      fixedSpecialty: '',
+      fixedTag: '',
+      vdMain: '',
+    };
+    var chain = [];
+    var el = root;
+    for (var i = 0; i < 12 && el && el.nodeType === 1; i++) {
+      chain.push(el);
+      el = el.parentElement;
+    }
+    function pick(getter) {
+      for (var j = 0; j < chain.length; j++) {
+        var d = chain[j].dataset || {};
+        var v = getter(d);
+        if (v != null && String(v).trim() !== '') return String(v).trim();
+      }
+      return '';
+    }
+    out.apiBase = pick(function (d) {
+      return d.apiBase;
+    });
+    out.apiKey = pick(function (d) {
+      return d.apiKey;
+    });
+    out.fixedInsurance = pick(function (d) {
+      return d.fixedInsurance;
+    });
+    out.fixedSpecialty = pick(function (d) {
+      return d.fixedSpecialty;
+    });
+    out.fixedTag = pick(function (d) {
+      return d.fixedTag;
+    });
+    out.vdMain = pick(function (d) {
+      return d.vdMain;
+    });
+    return out;
+  }
+
+  function pathInsuranceSegment() {
+    var m = location.pathname.match(/\/insurances?\/([^/?#]+)/i);
+    if (!m) return '';
+    try {
+      return decodeURIComponent(m[1] || '').replace(/\+/g, ' ').trim();
+    } catch (e) {
+      return (m[1] || '').trim();
+    }
+  }
+
+  function slugToInsuranceLabel(slug) {
+    if (!slug) return '';
+    return slug
+      .split(/[-_]+/)
+      .filter(Boolean)
+      .map(function (w) {
+        return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      })
+      .join(' ');
+  }
+
+  function mainFlagTrue(v) {
+    var s = String(v || '')
+      .trim()
+      .toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes';
+  }
+
   function main() {
     var $root = document.getElementById('vedic-rd-directory');
     if (!$root) return;
 
     mount($root);
 
-    var ds = $root.dataset || {};
+    var merged = mergeDirectoryConfig($root);
+    var forceMain = mainFlagTrue(merged.vdMain);
+
+    var pathSeg = pathInsuranceSegment();
+    var fromPath = !forceMain && pathSeg ? slugToInsuranceLabel(pathSeg) : '';
+    var fixedIns = forceMain ? '' : merged.fixedInsurance || fromPath;
+    var fixedSpec = merged.fixedSpecialty;
+    var fixedTagVal = merged.fixedTag;
 
     var DEFAULT_API =
       'https://script.google.com/macros/s/AKfycbxev-lmv8hBefUnj48SMY_B6Hdrzw-UtxF0k-aIxrum5PkRnWeY_QC2hEzKIWm_GqQpcQ/exec';
-    var API_BASE = (ds.apiBase && String(ds.apiBase).trim()) || DEFAULT_API;
+    var API_BASE = merged.apiBase || DEFAULT_API;
     var SLOTS_API = API_BASE;
-    var API_KEY = (ds.apiKey && String(ds.apiKey).trim()) || '';
+    var API_KEY = merged.apiKey || '';
 
-    function fixedInsurance() {
-      return (ds.fixedInsurance && String(ds.fixedInsurance).trim()) || '';
-    }
-    function fixedSpecialty() {
-      return (ds.fixedSpecialty && String(ds.fixedSpecialty).trim()) || '';
-    }
-    function fixedTag() {
-      return (ds.fixedTag && String(ds.fixedTag).trim()) || '';
-    }
-
-    var isInsuranceLanding = !!fixedInsurance();
+    var isInsuranceLanding = !!fixedIns;
 
     var ACTIVE_ONLY = true;
     var BOOK_PATH_PREFIX = '/dietitians';
@@ -245,12 +316,10 @@
         sort: 'name',
       };
       if ($search && $search.value) params.search = $search.value.trim();
-      var insVal = fixedInsurance() || ($insurance && $insurance.value) || '';
+      var insVal = fixedIns || ($insurance && $insurance.value) || '';
       if (insVal) params.insurance = insVal;
-      var specVal = fixedSpecialty();
-      if (specVal) params.specialty = specVal;
-      var tagVal = fixedTag();
-      if (tagVal) params.tag = tagVal;
+      if (fixedSpec) params.specialty = fixedSpec;
+      if (fixedTagVal) params.tag = fixedTagVal;
 
       return api(params)
         .then(function (data) {
