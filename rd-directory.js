@@ -8,7 +8,7 @@
 (function () {
   'use strict';
 
-  var SLOT_WINDOW_DAYS = 10; // one batch slots call per provider (faster than N× single-day calls)
+  var SLOT_WINDOW_DAYS = 21; // batch slots call per provider (Apps Script max window)
 
   var STYLES =
     ':root{--vd-bg:#F3F1E7;--vd-card:#FFFFFF;--vd-border:#e5e7eb;--vd-shadow:0 2px 8px rgba(0,0,0,.06);--vd-shadow-hover:0 6px 20px rgba(0,0,0,.12);--vd-text:#3E3E3E;--vd-muted:#6b7280;--vd-primary:#186AD0;--vd-primary-hover:#1557ab;--vd-accent:#D0A740}' +
@@ -49,13 +49,22 @@
     '.vd-btn:hover{background:var(--vd-primary-hover);border-color:var(--vd-primary-hover);transform:translateY(-2px);box-shadow:0 8px 24px rgba(24,106,208,.35)}' +
     '.vd-count{max-width:1100px;margin:0 auto 8px;font-size:.875rem;color:var(--vd-muted);min-height:1.25em;box-sizing:border-box;padding:0 4px}' +
     '.vd-status{max-width:1100px;margin:8px auto;text-align:center;color:var(--vd-muted);font-size:.875rem;box-sizing:border-box}' +
-    '#vedic-rd-directory .vd-loader-panel{max-width:1100px;margin:0 auto 20px;padding:clamp(.9rem,2vw,1.2rem) clamp(1rem,3vw,1.25rem);border:1px solid rgba(0,0,0,.06);border-radius:14px;background:rgba(255,255,255,.9);box-shadow:0 8px 24px rgba(17,24,39,.07);box-sizing:border-box}' +
-    '.vd-loader-kicker{margin:0 0 .35rem;color:#1f4f8f;font-size:.72rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase}' +
-    '.vd-loader-title{margin:0 0 .25rem;font-size:1rem;font-weight:700;color:var(--vd-text)}' +
-    '.vd-loader-sub{margin:0;font-size:.8rem;color:var(--vd-muted);line-height:1.45}' +
-    '.vd-loader-bar{height:4px;border-radius:999px;background:#e8e8e8;margin-top:12px;overflow:hidden}' +
-    '.vd-loader-bar>i{display:block;height:100%;width:34%;border-radius:999px;background:var(--vd-primary);animation:vd-bar 1.1s ease-in-out infinite}' +
-    '@keyframes vd-bar{0%{transform:translateX(-100%)}100%{transform:translateX(320%)}}' +
+    '#vedic-rd-directory #vd-loader{display:flex;align-items:center;justify-content:center;width:100%;max-width:1100px;margin:0 auto;min-height:min(28vh,260px);padding:clamp(1.25rem,4vw,2.75rem) clamp(1rem,4vw,2rem);box-sizing:border-box;background:transparent}' +
+    '#vedic-rd-directory .vd-loader-inner{width:100%;max-width:34rem;margin:0 auto;text-align:left;display:flex;flex-direction:column;align-items:stretch;gap:.55rem;padding:clamp(.8rem,2vw,1.1rem);border:1px solid rgba(0,0,0,.06);border-radius:14px;background:rgba(255,255,255,.82);box-shadow:0 8px 24px rgba(17,24,39,.07);font-family:inherit;box-sizing:border-box}' +
+    '#vedic-rd-directory .vd-loader-item{width:100%;box-sizing:border-box}' +
+    '#vedic-rd-directory .vd-loader-kicker{margin:0;padding:.15rem 0;color:#1f4f8f;font-size:.72rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase}' +
+    '#vedic-rd-directory .vd-loader-steps{list-style:none;margin:.1rem 0 .1rem;padding:0;display:flex;flex-direction:column;gap:.35rem}' +
+    '#vedic-rd-directory .vd-loader-step{display:flex;align-items:flex-start;gap:.55rem;color:#6b7280;font-size:.74rem;line-height:1.35;opacity:0;transform:translateY(6px);transition:opacity .35s ease,transform .35s ease,color .2s ease}' +
+    '#vedic-rd-directory .vd-loader-step.is-visible{opacity:1;transform:translateY(0)}' +
+    '#vedic-rd-directory .vd-loader-dot{width:10px;height:10px;margin-top:.2rem;flex:0 0 10px;border-radius:50%;border:1.5px solid #9ca3af;background:#fff;transition:background .2s ease,border-color .2s ease,box-shadow .2s ease}' +
+    '#vedic-rd-directory .vd-loader-step.is-active{color:#1f4f8f;font-weight:600}' +
+    '#vedic-rd-directory .vd-loader-step.is-active .vd-loader-dot{border-color:#186ad0;background:#186ad0;box-shadow:0 0 0 3px rgba(24,106,208,.18)}' +
+    '#vedic-rd-directory .vd-loader-step.is-done{color:#4b5563}' +
+    '#vedic-rd-directory .vd-loader-step.is-done .vd-loader-dot{border-color:#16a34a;background:#16a34a}' +
+    '#vedic-rd-directory .vd-loader-subline{margin:.15rem 0 0;font-size:.74rem;font-weight:400;letter-spacing:.01em;color:#6b7280;line-height:1.35;max-width:30rem}' +
+    '#vedic-rd-directory .vd-loader-subline[hidden]{display:none!important}' +
+    '#vedic-rd-directory .vd-loader-trust{margin:.1rem 0 0;font-size:.72rem;color:#4b5563;line-height:1.3}' +
+    '@media (prefers-reduced-motion:reduce){#vedic-rd-directory .vd-loader-step{transition:none;transform:none}}' +
     '.vd-loader-hidden{display:none!important}' +
     '.vd-card-hidden{display:none!important}' +
     '.vd-card-reveal{animation:vd-fade-in .35s ease forwards}' +
@@ -73,12 +82,12 @@
     '<option value="all">Show all dietitians</option>' +
     '</select></div>' +
     '<div id="vd-count" class="vd-count"></div>' +
-    '<div id="vd-loader" class="vd-loader-hidden" role="status" aria-live="polite">' +
-    '<div class="vd-loader-panel">' +
-    '<p class="vd-loader-kicker">Almost ready</p>' +
-    '<p id="vd-loader-title" class="vd-loader-title">Loading dietitians</p>' +
-    '<p id="vd-loader-sub" class="vd-loader-sub">Matching you with providers who fit your preferences.</p>' +
-    '<div class="vd-loader-bar" aria-hidden="true"><i></i></div>' +
+    '<div id="vd-loader" class="vd-loader vd-loader-hidden" role="status" aria-live="polite" aria-busy="false">' +
+    '<div class="vd-loader-inner">' +
+    '<p class="vd-loader-kicker">Meet our dietitians</p>' +
+    '<ol id="vd-loader-steps" class="vd-loader-steps" aria-label="Loading progress"></ol>' +
+    '<p id="vd-loader-sub" class="vd-loader-subline vd-loader-item">Usually under a minute.</p>' +
+    '<p class="vd-loader-trust vd-loader-item">Browse profiles — no payment to view availability.</p>' +
     '</div></div>' +
     '<div id="vd-grid" class="vd-grid" aria-live="polite"></div>' +
     '<div id="vd-status" class="vd-status"></div>' +
@@ -229,8 +238,98 @@
     var $count = $root.querySelector('#vd-count');
     var $status = $root.querySelector('#vd-status');
     var $loader = $root.querySelector('#vd-loader');
-    var $loaderTitle = $root.querySelector('#vd-loader-title');
+    var $loaderSteps = $root.querySelector('#vd-loader-steps');
     var $loaderSub = $root.querySelector('#vd-loader-sub');
+
+    var LINES_LOAD_TEAM = ['Gathering our dietitians', 'Applying your filters'];
+    var LINES_CHECK_SLOTS = [
+      'Checking live availability',
+      'Looking at the next ' + SLOT_WINDOW_DAYS + ' days',
+      'Preparing who can see you soon',
+    ];
+    var loaderNarrativeTimer = null;
+    var loaderLineIndex = -1;
+    var loaderLinesActive = [];
+    var loaderTickMs = 1650;
+
+    function stopLoaderNarrative() {
+      if (loaderNarrativeTimer) {
+        clearInterval(loaderNarrativeTimer);
+        loaderNarrativeTimer = null;
+      }
+    }
+
+    function appendLoaderStep(label) {
+      if (!$loaderSteps || !label) return;
+      var prev = $loaderSteps.querySelector('.vd-loader-step.is-active');
+      if (prev) {
+        prev.classList.remove('is-active');
+        prev.classList.add('is-done');
+      }
+      var li = document.createElement('li');
+      li.className = 'vd-loader-step';
+      li.innerHTML =
+        '<span class="vd-loader-dot" aria-hidden="true"></span><span class="vd-loader-steptext"></span>';
+      li.querySelector('.vd-loader-steptext').textContent = label;
+      $loaderSteps.appendChild(li);
+      requestAnimationFrame(function () {
+        li.classList.add('is-visible', 'is-active');
+      });
+    }
+
+    function runLoaderTick() {
+      if (!$loader || $loader.classList.contains('vd-loader-hidden')) return;
+      if (loaderLineIndex >= loaderLinesActive.length - 1) return;
+      loaderLineIndex += 1;
+      appendLoaderStep(loaderLinesActive[loaderLineIndex]);
+    }
+
+    function startLoaderNarrativeEarly() {
+      stopLoaderNarrative();
+      loaderLinesActive = LINES_LOAD_TEAM;
+      loaderLineIndex = -1;
+      loaderTickMs = 1700;
+      if ($loaderSteps) $loaderSteps.innerHTML = '';
+      if ($loaderSub) {
+        $loaderSub.textContent = 'We are loading profiles that match this page.';
+        $loaderSub.removeAttribute('hidden');
+      }
+      runLoaderTick();
+      loaderNarrativeTimer = setInterval(runLoaderTick, loaderTickMs);
+    }
+
+    function startLoaderNarrativeSlots(nProviders) {
+      stopLoaderNarrative();
+      if ($loaderSteps) $loaderSteps.innerHTML = '';
+      loaderLinesActive = LINES_CHECK_SLOTS;
+      loaderLineIndex = -1;
+      loaderTickMs = 1450;
+      if ($loaderSub) {
+        $loaderSub.textContent =
+          'Checking ' +
+          nProviders +
+          ' calendar' +
+          (nProviders === 1 ? '' : 's') +
+          ' for hourly openings…';
+        $loaderSub.removeAttribute('hidden');
+      }
+      runLoaderTick();
+      loaderNarrativeTimer = setInterval(runLoaderTick, loaderTickMs);
+    }
+
+    function showMeetLoader() {
+      if (!$loader) return;
+      $loader.classList.remove('vd-loader-hidden');
+      $loader.setAttribute('aria-busy', 'true');
+      startLoaderNarrativeEarly();
+    }
+
+    function hideMeetLoader() {
+      stopLoaderNarrative();
+      if (!$loader) return;
+      $loader.classList.add('vd-loader-hidden');
+      $loader.setAttribute('aria-busy', 'false');
+    }
     var $search = $root.querySelector('#vd-search');
     var $insurance = $root.querySelector('#vd-insurance');
     var $accepting = $root.querySelector('#vd-accepting');
@@ -327,29 +426,18 @@
       });
     }
 
-    function setLoader(visible, title, sub) {
-      if (!$loader) return;
-      if (visible) {
-        $loader.classList.remove('vd-loader-hidden');
-        if ($loaderTitle && title) $loaderTitle.textContent = title;
-        if ($loaderSub && sub != null) $loaderSub.textContent = sub;
-      } else {
-        $loader.classList.add('vd-loader-hidden');
-      }
-    }
-
     function loadProviders() {
       $status.textContent = '';
       $grid.innerHTML = '';
       $count.textContent = '';
-      setLoader(false);
+      hideMeetLoader();
 
       var acceptingYes = isInsuranceLanding || $accepting.value === 'yes';
 
       if (!acceptingYes) {
         $status.textContent = 'Loading providers…';
       } else {
-        setLoader(true, 'Loading dietitians', 'Finding providers with openings soon.');
+        showMeetLoader();
       }
 
       var params = {
@@ -369,7 +457,7 @@
           if (!data.ok) throw new Error(data.error || 'Load failed');
 
           if (acceptingYes) {
-            setLoader(true, 'Checking availability', 'Scanning calendars for the next ' + SLOT_WINDOW_DAYS + ' days…');
+            startLoaderNarrativeSlots((data.providers || []).length);
           }
 
           render(sortProviders(data.providers || []), acceptingYes);
@@ -381,7 +469,7 @@
           $status.textContent = data.total ? '' : 'No matching providers.';
         })
         .finally(function () {
-          setLoader(false);
+          hideMeetLoader();
         });
     }
 
@@ -425,7 +513,7 @@
     function applyAcceptingFilter() {
       var cards = [].slice.call($grid.querySelectorAll('.vd-profile-card'));
       if (!cards.length) {
-        setLoader(false);
+        hideMeetLoader();
         $status.textContent = 'No matching providers.';
         return Promise.resolve();
       }
@@ -445,7 +533,7 @@
           });
         })
       ).then(function () {
-        setLoader(false);
+        hideMeetLoader();
         if (!visible) {
           $status.textContent = 'No providers are currently accepting new clients.';
         }
@@ -618,7 +706,7 @@
       })
       .then(loadProviders)
       .catch(function (err) {
-        setLoader(false);
+        hideMeetLoader();
         $status.textContent = 'Error loading directory.';
         console.error(err);
       });
