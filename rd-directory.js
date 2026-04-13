@@ -3,6 +3,7 @@
  * Config can live on #vedic-rd-directory OR any ancestor (Webflow wrapper / Section custom attrs).
  * data-vd-main="true" — force main directory (show search/filters) even if a parent has data-fixed-insurance.
  * Insurance SEO: data-fixed-insurance="Anthem" OR URL /insurance/anthem → filter + hide controls (slug → "Anthem").
+ * Fixed site header: data-vd-header-offset="96" (px) or "5rem" — top padding so controls aren’t under position:fixed nav (default 88px).
  */
 (function () {
   'use strict';
@@ -11,7 +12,7 @@
 
   var STYLES =
     ':root{--vd-bg:#F3F1E7;--vd-card:#FFFFFF;--vd-border:#e5e7eb;--vd-shadow:0 2px 8px rgba(0,0,0,.06);--vd-shadow-hover:0 6px 20px rgba(0,0,0,.12);--vd-text:#3E3E3E;--vd-muted:#6b7280;--vd-primary:#186AD0;--vd-primary-hover:#1557ab;--vd-accent:#D0A740}' +
-    '#vedic-rd-directory{--vd-bg:#F3F1E7;--vd-card:#FFFFFF;--vd-border:#e5e7eb;--vd-shadow:0 2px 8px rgba(0,0,0,.06);--vd-shadow-hover:0 6px 20px rgba(0,0,0,.12);--vd-text:#3E3E3E;--vd-muted:#6b7280;--vd-primary:#186AD0;--vd-primary-hover:#1557ab;--vd-accent:#D0A740}' +
+    '#vedic-rd-directory{--vd-bg:#F3F1E7;--vd-card:#FFFFFF;--vd-border:#e5e7eb;--vd-shadow:0 2px 8px rgba(0,0,0,.06);--vd-shadow-hover:0 6px 20px rgba(0,0,0,.12);--vd-text:#3E3E3E;--vd-muted:#6b7280;--vd-primary:#186AD0;--vd-primary-hover:#1557ab;--vd-accent:#D0A740;--vd-header-offset:88px;padding-top:var(--vd-header-offset);box-sizing:border-box;position:relative}' +
     '.vd-embed-root{display:block;width:100%;max-width:100%;min-width:0;box-sizing:border-box;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}' +
     '.vd-controls{max-width:1100px;margin:16px auto 12px;padding:16px 20px;border:1px solid var(--vd-border);border-radius:12px;background:var(--vd-card);box-shadow:var(--vd-shadow);display:flex;flex-wrap:wrap;gap:.75rem;align-items:stretch;box-sizing:border-box}' +
     '#vedic-rd-directory.vd-main-mode .vd-controls{display:flex!important;flex-wrap:wrap!important;visibility:visible!important;opacity:1!important;min-height:0}' +
@@ -143,7 +144,25 @@
     out.vdMain = pick(function (d) {
       return d.vdMain;
     });
+    out.headerOffset = pick(function (d) {
+      return d.vdHeaderOffset;
+    });
     return out;
+  }
+
+  function normalizeHeaderOffset(raw) {
+    raw = String(raw == null ? '' : raw).trim();
+    if (!raw) return '88px';
+    if (raw === '0' || raw === '0px') return '0px';
+    if (/^\d+(\.\d+)?$/.test(raw)) return raw + 'px';
+    return raw;
+  }
+
+  function resolveHeaderOffset(root, merged) {
+    var a = root.getAttribute('data-vd-header-offset');
+    if (a != null && String(a).trim() !== '') return normalizeHeaderOffset(String(a).trim());
+    if (merged.headerOffset) return normalizeHeaderOffset(merged.headerOffset);
+    return '88px';
   }
 
   function pathInsuranceSegment() {
@@ -181,6 +200,7 @@
     mount($root);
 
     var merged = mergeDirectoryConfig($root);
+    $root.style.setProperty('--vd-header-offset', resolveHeaderOffset($root, merged));
     // Prefer raw attribute — some Webflow embed runtimes expose dataset inconsistently.
     var forceMain =
       mainFlagTrue($root.getAttribute('data-vd-main')) || mainFlagTrue(merged.vdMain);
