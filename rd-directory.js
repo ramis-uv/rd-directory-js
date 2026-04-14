@@ -26,8 +26,10 @@
     '#vedic-rd-directory{--vd-bg:#F3F1E7;--vd-card:#FFFFFF;--vd-border:#e5e7eb;--vd-shadow:0 2px 8px rgba(0,0,0,.06);--vd-shadow-hover:0 6px 20px rgba(0,0,0,.12);--vd-text:#3E3E3E;--vd-muted:#6b7280;--vd-primary:#186AD0;--vd-primary-hover:#1557ab;--vd-accent:#D0A740;--vd-header-offset:88px;padding-top:var(--vd-header-offset);box-sizing:border-box;position:relative}' +
     '.vd-embed-root{display:block;width:100%;max-width:100%;min-width:0;box-sizing:border-box;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}' +
     '.vd-controls{max-width:1100px;margin:16px auto 12px;padding:16px 20px;border:1px solid var(--vd-border);border-radius:12px;background:var(--vd-card);box-shadow:var(--vd-shadow);display:flex;flex-wrap:wrap;gap:.75rem;align-items:stretch;box-sizing:border-box}' +
+    '@media screen and (max-width:991px){.vd-controls{flex-direction:column;align-items:stretch;gap:.65rem;padding:14px 16px}.vd-controls #vd-search,.vd-controls select{flex:1 1 auto!important;width:100%!important;max-width:100%!important;min-width:0!important}}' +
     '#vedic-rd-directory.vd-main-mode .vd-controls{display:flex!important;flex-wrap:wrap!important;visibility:visible!important;opacity:1!important;min-height:0}' +
     '#vedic-rd-directory.vd-insurance-mode .vd-controls{display:none!important}' +
+    '#vedic-rd-directory.vd-insurance-mode .vd-count--loading{margin-top:4px}' +
     '#vedic-rd-directory input.vd-search-input,#vedic-rd-directory #vd-search{display:block!important;visibility:visible!important;opacity:1!important;-webkit-appearance:none;appearance:none;box-sizing:border-box;min-height:44px!important;flex:1 1 220px;max-width:100%;width:auto!important;min-width:120px!important;border:1px solid var(--vd-border);border-radius:8px;padding:10px 14px;font-size:15px!important;line-height:1.3!important;color:var(--vd-text)!important;background:#fff!important}' +
     '#vedic-rd-directory input.vd-search-input::placeholder,#vedic-rd-directory #vd-search::placeholder{color:var(--vd-muted)}' +
     '.vd-controls select{border:1px solid var(--vd-border);border-radius:8px;padding:10px 14px;font-size:15px;flex:1 1 180px;min-height:44px;background:#fff;color:var(--vd-text);box-sizing:border-box}' +
@@ -58,7 +60,11 @@
     '.vd-actions{margin-top:24px;padding-top:24px;border-top:2px solid var(--vd-border);display:flex;flex-wrap:wrap;gap:12px;align-items:center}' +
     '.vd-btn{display:inline-block;background:var(--vd-primary);color:#fff!important;padding:14px 28px;border-radius:12px;text-decoration:none;font-weight:700;font-size:1.05rem;transition:all .2s ease;box-shadow:0 4px 12px rgba(24,106,208,.25);border:2px solid var(--vd-primary);box-sizing:border-box}' +
     '.vd-btn:hover{background:var(--vd-primary-hover);border-color:var(--vd-primary-hover);transform:translateY(-2px);box-shadow:0 8px 24px rgba(24,106,208,.35)}' +
-    '.vd-count{max-width:1100px;margin:0 auto 8px;font-size:.875rem;color:var(--vd-muted);min-height:1.25em;box-sizing:border-box;padding:0 4px}' +
+    '.vd-count{max-width:1100px;margin:0 auto 10px;font-size:.875rem;color:var(--vd-muted);min-height:1.5em;box-sizing:border-box;padding:0 4px}' +
+    '.vd-count--loading{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem .65rem;padding:6px 4px 10px;color:var(--vd-text);font-size:.9375rem;font-weight:500;line-height:1.4}' +
+    '.vd-count-msg{flex:1;min-width:0}' +
+    '.vd-count-spinner{flex-shrink:0;width:20px;height:20px;border-radius:50%;border:2.5px solid rgba(24,106,208,.18);border-top-color:var(--vd-primary);animation:vd-count-spin .7s linear infinite;box-sizing:border-box}' +
+    '@keyframes vd-count-spin{to{transform:rotate(360deg)}}' +
     '.vd-status{max-width:1100px;margin:8px auto;text-align:center;color:var(--vd-muted);font-size:.875rem;box-sizing:border-box}' +
     '.vd-card-hidden{display:none!important}' +
     '.vd-card-reveal{animation:vd-fade-in .35s ease forwards}' +
@@ -75,7 +81,7 @@
     '.vd-card-checking .vd-profile-left,.vd-card-checking .vd-profile-right{filter:blur(4px);opacity:.5;transition:filter .4s ease,opacity .4s ease;pointer-events:none;-webkit-user-select:none;user-select:none}' +
     '.vd-card-checking::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;border-radius:50%;border:3px solid rgba(24,106,208,.15);border-top-color:var(--vd-primary);animation:vd-spin .7s linear infinite;z-index:2}' +
     '@keyframes vd-spin{to{transform:translate(-50%,-50%) rotate(360deg)}}' +
-    '@media (prefers-reduced-motion:reduce){.vd-skeleton,.vd-card-checking::after{animation:none}}' +
+    '@media (prefers-reduced-motion:reduce){.vd-skeleton,.vd-card-checking::after,.vd-count-spinner{animation:none;border-color:rgba(24,106,208,.45)}}' +
     '@media (max-width:720px){.vd-profile-card{padding:16px;gap:12px;flex-direction:row;flex-wrap:nowrap;align-items:flex-start}.vd-profile-left{flex:0 0 70px}.vd-profile-left img{width:70px;height:70px;border-width:2px}.vd-profile-right{flex:1;min-width:0}.vd-profile-name{font-size:1.1rem}.vd-line{font-size:.8rem}.vd-bio-text{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.vd-bio-text.vd-expanded{display:block;-webkit-line-clamp:unset;line-clamp:unset}.vd-bio-toggle{display:inline-block}.vd-tag-pill{padding:2px 6px;font-size:.6rem;border-radius:8px;border-width:1px;background:transparent}.vd-specialties-wrapper{margin-top:10px}.vd-actions{margin-top:14px;padding-top:14px;border-top-width:1px}.vd-btn{padding:12px 22px;font-size:1rem}.vd-skeleton{padding:16px;gap:12px;min-height:100px}.vd-skeleton-avatar{width:70px;height:70px}}' +
     '@media (max-width:479px){.vd-embed-root{width:100vw;max-width:100vw;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);padding-left:max(12px,env(safe-area-inset-left,0));padding-right:max(12px,env(safe-area-inset-right,0))}.vd-profile-card{flex-direction:column;align-items:stretch;padding:14px 12px;gap:14px}.vd-profile-left{align-self:center;flex:0 0 auto}.vd-profile-left img{width:88px;height:88px}.vd-profile-name{text-align:center}.vd-specialties-wrapper{display:none}.vd-skeleton{flex-direction:column;align-items:center;padding:14px 12px}.vd-skeleton-avatar{width:88px;height:88px}}';
 
@@ -229,6 +235,39 @@
     var allProviders = [];
     var availCache = {};
     var pendingAvailCheck = false;
+    var providersReady = false;
+    var facetsReady = !!isInsurance;
+
+    /* ---------- Top status (conversion copy + spinner until APIs settle) ---------- */
+
+    function updateTopLine() {
+      var acceptYes = isInsurance || $accepting.value === 'yes';
+      var loading = !providersReady || !facetsReady;
+      if (!loading && acceptYes) {
+        var filtered = isInsurance ? allProviders : applyFilters(allProviders);
+        var needAvail = false;
+        for (var ti = 0; ti < filtered.length; ti++) {
+          var tp = filtered[ti];
+          if ((tp.profileStatusRaw || '').toUpperCase() === 'DEFAULT') continue;
+          if (availCache[tp.id] === undefined) {
+            needAvail = true;
+            break;
+          }
+        }
+        if (needAvail || pendingAvailCheck) loading = true;
+      }
+      if (loading) {
+        $count.className = 'vd-count vd-count--loading';
+        $count.innerHTML =
+          '<span class="vd-count-msg" role="status" aria-live="polite">Finding in-network dietitians for you\u2026</span>' +
+          '<span class="vd-count-spinner" aria-hidden="true"></span>';
+        $root.setAttribute('aria-busy', 'true');
+      } else {
+        $count.className = 'vd-count';
+        $count.innerHTML = '';
+        $root.removeAttribute('aria-busy');
+      }
+    }
 
     /* ---------- Query-string helpers ---------- */
 
@@ -267,8 +306,8 @@
           '</div></div>';
       }
       $grid.innerHTML = html;
-      $count.textContent = '';
       $status.textContent = '';
+      updateTopLine();
     }
 
     /* ---------- Card HTML ---------- */
@@ -400,22 +439,16 @@
 
       var visibleCount = $grid.querySelectorAll('.vd-profile-card').length;
       if (acceptYes) {
-        var stillChecking = $grid.querySelectorAll('.vd-card-checking').length;
-        if (stillChecking) {
-          $count.textContent = (visibleCount - stillChecking) + '+ dietitian' +
-            ((visibleCount - stillChecking) !== 1 ? 's' : '') + ' with openings soon';
-        } else {
-          $count.textContent = visibleCount + ' dietitian' + (visibleCount !== 1 ? 's' : '') + ' with openings soon';
-          $status.textContent = visibleCount ? '' : 'No providers are currently accepting new clients.';
-        }
+        $status.textContent = visibleCount ? '' : 'No providers are currently accepting new clients.';
       } else {
-        $count.textContent = visibleCount + ' dietitian' + (visibleCount !== 1 ? 's' : '') + ' found';
         $status.textContent = visibleCount ? '' : 'No matching providers.';
       }
 
+      updateTopLine();
+
       if (acceptYes) {
         var unchecked = nonDefaults.filter(function (p) { return availCache[p.id] === undefined; });
-        if (unchecked.length) checkAvailability(unchecked);
+        if (unchecked.length && !pendingAvailCheck) checkAvailability(unchecked);
       }
     }
 
@@ -426,6 +459,7 @@
       if (!ids.length) return;
 
       pendingAvailCheck = true;
+      updateTopLine();
       api({
         mode: 'availability',
         ids: ids.join(','),
@@ -525,10 +559,17 @@
     if (!isInsurance) ready.push(loadFacets());
 
     Promise.all(ready).then(function () {
+      providersReady = true;
+      if (!isInsurance) facetsReady = true;
       renderAll();
     }).catch(function (err) {
+      providersReady = true;
+      if (!isInsurance) facetsReady = true;
       $grid.innerHTML = '';
+      $count.className = 'vd-count';
+      $count.innerHTML = '';
       $status.textContent = 'Error loading directory.';
+      $root.removeAttribute('aria-busy');
       console.error('[vd-directory]', err);
     });
 
