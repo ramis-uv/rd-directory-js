@@ -259,8 +259,8 @@
       if (loading) {
         $count.className = 'vd-count vd-count--loading';
         $count.innerHTML =
-          '<span class="vd-count-msg" role="status" aria-live="polite">Finding in-network dietitians for you\u2026</span>' +
-          '<span class="vd-count-spinner" aria-hidden="true"></span>';
+          '<span class="vd-count-spinner" aria-hidden="true"></span>' +
+          '<span class="vd-count-msg" role="status" aria-live="polite">Finding in-network dietitians for you\u2026</span>';
         $root.setAttribute('aria-busy', 'true');
       } else {
         $count.className = 'vd-count';
