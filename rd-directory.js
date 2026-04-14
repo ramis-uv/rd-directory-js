@@ -1,8 +1,20 @@
 /**
  * Vedic Nutrition — RD directory (mounts into #vedic-rd-directory)
  *
- * DEFAULT providers come from Webflow CMS (Collection List in #vd-cms-defaults) — zero JS, instant paint.
- * NON-DEFAULT providers come from the API (mode=providers) and are checked via batched mode=availability.
+ * All cards come from Webflow CMS (Collection List in #vd-cms-defaults). Sort, rank, and “status”
+ * (e.g. DEFAULT vs live calendar) are CMS fields — not the Google Sheet.
+ * The API is used only for batched availability: POST mode=availabilityBatch with calendar payloads
+ * read from data-* attributes on each card.
+ *
+ * Card attributes:
+ *   data-slug — stable id for API availability keys (required)
+ *   data-vd-default="true" — editorial / skip FreeBusy (always counts as “accepting”); always listed
+ *   data-vd-in-directory="false" — hide card everywhere (even “Show all”), same as sheet profile FALSE;
+ *     omitted or true = listed. Editorial (data-vd-default) overrides and always lists.
+ *   data-calendar-id (or data-calendar) — Google Calendar id; optional data-email as calendar id
+ *   data-tz — IANA timezone (default America/Chicago)
+ *   data-start-time / data-end-time — e.g. 9:00 AM / 7:00 PM
+ *   data-vd-insurances — comma list for main-page insurance filter (optional; if omitted, insurance filter does not hide the card)
  *
  * data-vd-main="true" — force main directory (show search/filters) even if a parent has data-fixed-insurance.
  * Insurance SEO: data-fixed-insurance="Anthem" OR URL /insurance/anthem → filter + hide controls.
@@ -216,9 +228,6 @@
     $root.classList.toggle('vd-main-mode', !isInsuranceLanding);
     $root.classList.toggle('vd-insurance-mode', isInsuranceLanding);
 
-    var ACTIVE_ONLY = true;
-    var BOOK_PATH_PREFIX = '/dietitians';
-
     var $grid = $root.querySelector('#vd-grid');
     var $count = $root.querySelector('#vd-count');
     var $status = $root.querySelector('#vd-status');
@@ -228,12 +237,7 @@
 
     if (!$grid || !$accepting) return;
 
-    var cmsSlugSet = {};
-    [].slice.call($grid.querySelectorAll('.vd-cms-card')).forEach(function (el) {
-      var s = (el.getAttribute('data-slug') || '').trim().toLowerCase();
-      if (s) cmsSlugSet[s] = true;
-    });
-    var cmsDefaultCount = Object.keys(cmsSlugSet).length;
+    var cmsDefaultCount = $grid.querySelectorAll('.vd-cms-card').length;
 
     upgradeCmsCards($grid);
 
@@ -266,10 +270,6 @@
       }
     }
 
-    if (cmsDefaultCount > 0) {
-      $count.textContent = cmsDefaultCount + ' dietitian' + (cmsDefaultCount !== 1 ? 's' : '');
-    }
-
     function getQS() { return new URLSearchParams(location.search); }
     function setQS(params) {
       var next = new URLSearchParams(location.search);
@@ -278,23 +278,6 @@
         else next.set(kv[0], kv[1]);
       });
       history.replaceState({}, '', location.pathname + '?' + next.toString());
-    }
-    function optionize(list, select) {
-      var cur = getQS().get(select.id.replace('vd-', '')) || '';
-      var frag = document.createDocumentFragment();
-      var base = document.createElement('option');
-      base.value = '';
-      base.textContent = select.options[0].textContent;
-      frag.appendChild(base);
-      list.forEach(function (v) {
-        var opt = document.createElement('option');
-        opt.value = v;
-        opt.textContent = v;
-        if (v === cur) opt.selected = true;
-        frag.appendChild(opt);
-      });
-      select.innerHTML = '';
-      select.appendChild(frag);
     }
     function debounce(fn, ms) {
       ms = ms || 300;
@@ -306,169 +289,164 @@
       };
     }
 
-    function api(params) {
-      params = params || {};
-      var p = new URLSearchParams(params);
-      if (API_KEY) p.set('key', API_KEY);
-      var url = API_BASE + (API_BASE.indexOf('?') >= 0 ? '&' : '?') + p.toString();
-      return fetch(url, { credentials: 'omit' }).then(function (res) {
+    function apiPost(payload) {
+      payload = payload || {};
+      if (API_KEY) payload.key = API_KEY;
+      return fetch(API_BASE, {
+        method: 'POST',
+        credentials: 'omit',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).then(function (res) {
         if (!res.ok) throw new Error('Network error');
         return res.json();
       });
     }
 
-    function loadFacets() {
-      if (isInsuranceLanding || !$insurance) return Promise.resolve();
-      return api({ mode: 'facets' }).then(function (data) {
-        if (!data.ok) throw new Error(data.error || 'Facets failed');
-        optionize(data.facets.insurances || [], $insurance);
+    function cardId(card) {
+      return (card.getAttribute('data-slug') || card.getAttribute('data-id') || '').trim();
+    }
+
+    function listMatch(attrName, fixedVal, card) {
+      if (!fixedVal) return true;
+      var raw = (card.getAttribute(attrName) || '').trim().toLowerCase();
+      if (!raw) return true;
+      var want = String(fixedVal).trim().toLowerCase();
+      return raw.split(',').some(function (s) {
+        return s.trim() === want;
       });
     }
 
-    function batchCheckAvailability(ids) {
-      if (!ids || !ids.length) return Promise.resolve({});
-      return api({
-        mode: 'availability',
-        ids: ids.join(','),
-        days: String(SLOT_WINDOW_DAYS),
-      }).then(function (data) {
-        return (data && data.ok && data.availability) ? data.availability : {};
-      }).catch(function () {
-        return {};
-      });
+    /** Sheet-equivalent: FALSE = never list; DEFAULT (editorial) always lists regardless. */
+    function passesDirectoryListing(card) {
+      if (mainFlagTrue(card.getAttribute('data-vd-default'))) return true;
+      var v = (card.getAttribute('data-vd-in-directory') || '').trim().toLowerCase();
+      if (v === 'false' || v === '0' || v === 'no') return false;
+      return true;
     }
 
-    function clearApiCards() {
-      [].slice.call($grid.querySelectorAll('.vd-api-card')).forEach(function (el) {
-        el.remove();
-      });
-    }
-
-    function loadProviders() {
-      clearApiCards();
-      $status.textContent = '';
-
-      var acceptingYes = isInsuranceLanding || $accepting.value === 'yes';
-      var insVal = fixedIns || ($insurance && $insurance.value) || '';
-
-      if (cmsDefaultCount === 0) {
-        $status.textContent = acceptingYes
-          ? '<span class="vd-api-loading" aria-hidden="true"></span>Loading dietitians\u2026'
-          : 'Loading providers\u2026';
-        $status.innerHTML = $status.textContent;
-      } else if (acceptingYes) {
-        $count.textContent =
-          cmsDefaultCount + ' dietitian' + (cmsDefaultCount !== 1 ? 's' : '') +
-          ' \u00b7 loading more\u2026';
+    function passesStaticFilters(card) {
+      if (!passesDirectoryListing(card)) return false;
+      var q = ($search && $search.value ? $search.value : '').trim().toLowerCase();
+      if (q) {
+        var nameEl = card.querySelector('.vd-profile-name');
+        var name = ((nameEl && nameEl.textContent) || card.getAttribute('data-name') || '').trim().toLowerCase();
+        if (name.indexOf(q) < 0) return false;
       }
+      var insVal = fixedIns || ($insurance && $insurance.value) || '';
+      if (insVal && !listMatch('data-vd-insurances', insVal, card)) return false;
+      if (fixedSpec && !listMatch('data-vd-specialties', fixedSpec, card)) return false;
+      if (fixedTagVal && !listMatch('data-vd-tags', fixedTagVal, card)) return false;
+      return true;
+    }
 
-      var params = {
-        mode: 'providers',
-        surface: 'profile',
-        activeOnly: ACTIVE_ONLY ? 'true' : 'false',
-        sort: 'name',
-      };
-      if ($search && $search.value) params.search = $search.value.trim();
-      if (insVal) params.insurance = insVal;
-      if (fixedSpec) params.specialty = fixedSpec;
-      if (fixedTagVal) params.tag = fixedTagVal;
-
-      return api(params)
+    function batchCheckAvailabilityFromCards(cards) {
+      var providers = [];
+      cards.forEach(function (card) {
+        if (mainFlagTrue(card.getAttribute('data-vd-default'))) return;
+        var id = cardId(card);
+        var cal = (card.getAttribute('data-calendar-id') || card.getAttribute('data-calendar') || '').trim();
+        var email = (card.getAttribute('data-email') || '').trim();
+        var tz = (card.getAttribute('data-tz') || '').trim() || 'America/Chicago';
+        var st = (card.getAttribute('data-start-time') || '').trim() || '9:00 AM';
+        var et = (card.getAttribute('data-end-time') || '').trim() || '7:00 PM';
+        if (!id) return;
+        if (!cal && !email) return;
+        providers.push({
+          id: id,
+          calendarId: cal,
+          email: email,
+          tz: tz,
+          startTime: st,
+          endTime: et,
+        });
+      });
+      if (!providers.length) return Promise.resolve({});
+      return apiPost({
+        mode: 'availabilityBatch',
+        days: SLOT_WINDOW_DAYS,
+        providers: providers,
+      })
         .then(function (data) {
-          if (!data.ok) throw new Error(data.error || 'Load failed');
-
-          var providers = (data.providers || []).filter(function (p) {
-            var s = String(p.slug || '').trim().toLowerCase();
-            return !cmsSlugSet[s];
-          });
-
-          if (acceptingYes) {
-            var ids = providers.map(function (p) { return p.id; }).filter(Boolean);
-            return batchCheckAvailability(ids).then(function (avail) {
-              var available = providers.filter(function (p) { return avail[p.id]; });
-              renderApiCards(sortProviders(available));
-              var total = cmsDefaultCount + available.length;
-              $count.textContent = total + ' dietitian' + (total !== 1 ? 's' : '') + ' with openings soon';
-              $status.textContent = total ? '' : 'No providers are currently accepting new clients.';
-            });
-          }
-
-          renderApiCards(sortProviders(providers));
-          var total = cmsDefaultCount + providers.length;
-          $count.textContent = total + ' dietitians found';
-          $status.textContent = total ? '' : 'No matching providers.';
+          if (!data || !data.ok) throw new Error((data && data.error) || 'Availability failed');
+          return data.availability || {};
         })
         .catch(function (err) {
-          $status.textContent = 'Error loading directory.';
           console.error(err);
+          return {};
         });
     }
 
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, function (m) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+    function countVisibleCards() {
+      return $grid.querySelectorAll('.vd-cms-card:not(.vd-card-hidden)').length;
+    }
+
+    function setCountLabel(acceptingYes) {
+      var n = countVisibleCards();
+      if (!n) {
+        $count.textContent = '0 dietitians';
+        return;
+      }
+      if (acceptingYes) {
+        $count.textContent =
+          n + ' dietitian' + (n !== 1 ? 's' : '') + ' with openings soon';
+      } else {
+        $count.textContent = n + ' dietitian' + (n !== 1 ? 's' : '') + ' found';
+      }
+    }
+
+    function refreshDirectory() {
+      var acceptingYes = isInsuranceLanding || $accepting.value === 'yes';
+      var cards = [].slice.call($grid.querySelectorAll('.vd-cms-card'));
+
+      cards.forEach(function (card) {
+        card.classList.remove('vd-card-hidden');
       });
-    }
-    function escapeAttr(s) {
-      return escapeHtml(s).replace(/"/g, '&quot;');
-    }
-    function firstName(full) {
-      return (full || '').split(' ')[0] || 'Provider';
-    }
 
-    function cardHtml(p) {
-      var slug = String(p.slug || '').trim();
-      var href = slug ? BOOK_PATH_PREFIX + '/' + encodeURIComponent(slug) : '#';
-      var specs = (p.specialties || []).map(escapeHtml);
-      var vis = specs.slice(0, 3);
-      var hid = specs.slice(3);
-      var tags = (p.tags || []).map(escapeHtml);
-      var ins = (p.insurances || []).map(escapeHtml);
-      var safeBio = escapeHtml(p.bio || '');
-      var safeName = escapeHtml(p.name || '');
-      var safeCred = escapeHtml(p.credentials || '');
+      cards.forEach(function (card) {
+        if (!passesStaticFilters(card)) card.classList.add('vd-card-hidden');
+      });
 
-      var tagsHtml = tags.length
-        ? '<div class="vd-tags-wrapper"><div class="vd-tags">' +
-          tags.map(function (t) { return '<span class="vd-tag-pill">' + t + '</span>'; }).join('') +
-          '</div></div>'
-        : '';
+      if (!acceptingYes) {
+        setCountLabel(false);
+        $status.textContent = '';
+        return;
+      }
 
-      var bioHtml = safeBio
-        ? '<div class="vd-bio"><div class="vd-bio-text">' +
-          safeBio +
-          '</div><button type="button" class="vd-bio-toggle">View more</button></div>'
-        : '';
+      var toCheck = cards.filter(function (card) {
+        if (card.classList.contains('vd-card-hidden')) return false;
+        if (mainFlagTrue(card.getAttribute('data-vd-default'))) return false;
+        var cal = (card.getAttribute('data-calendar-id') || card.getAttribute('data-calendar') || card.getAttribute('data-email') || '').trim();
+        return !!cal;
+      });
 
-      var visSpec = vis.map(function (s) { return '<span class="vd-specialty-tag">' + s + '</span>'; }).join('');
-      var hidSpec = hid.map(function (s) { return '<span class="vd-specialty-tag">' + s + '</span>'; }).join('');
-      var moreSpec =
-        hid.length > 0
-          ? '<span class="vd-hidden-spec">' + hidSpec + '</span><button type="button" class="vd-more-spec">+More</button>'
-          : '';
+      if (!toCheck.length) {
+        setCountLabel(true);
+        $status.textContent = '';
+        return;
+      }
 
-      return (
-        '<div class="vd-profile-card vd-api-card vd-card-reveal" data-id="' +
-        escapeAttr(p.id || '') + '" data-email="' + escapeAttr(p.email || '') + '">' +
-        '<div class="vd-profile-left"><img src="' +
-        escapeAttr(p.photoUrl || '') + '" alt="' + escapeAttr(p.name || 'Dietitian') +
-        '" loading="lazy"></div>' +
-        '<div class="vd-profile-right">' +
-        '<div class="vd-profile-name">' + safeName + (safeCred ? ', ' + safeCred : '') + '</div>' +
-        '<div class="vd-line"><strong>Insurances:</strong> ' + ins.join(', ') + '</div>' +
-        tagsHtml + bioHtml +
-        '<div class="vd-specialties-wrapper"><span class="vd-specialties-label">Specialties:</span><div class="vd-specialties">' +
-        visSpec + moreSpec + '</div></div>' +
-        '<div class="vd-actions"><a class="vd-btn" href="' + escapeAttr(href) +
-        '" target="_self">Book with ' + escapeHtml(firstName(p.name || '')) + '</a></div>' +
-        '</div></div>'
-      );
-    }
+      $status.innerHTML =
+        '<span class="vd-api-loading" aria-hidden="true"></span>Checking openings\u2026';
 
-    function renderApiCards(list) {
-      if (!list.length) return;
-      var html = list.map(function (p) { return cardHtml(p); }).join('');
-      $grid.insertAdjacentHTML('beforeend', html);
+      batchCheckAvailabilityFromCards(toCheck).then(function (avail) {
+        cards.forEach(function (card) {
+          if (card.classList.contains('vd-card-hidden')) return;
+          if (mainFlagTrue(card.getAttribute('data-vd-default'))) return;
+          var cal = (card.getAttribute('data-calendar-id') || card.getAttribute('data-calendar') || card.getAttribute('data-email') || '').trim();
+          if (!cal) {
+            card.classList.add('vd-card-hidden');
+            return;
+          }
+          var id = cardId(card);
+          if (!avail[id]) card.classList.add('vd-card-hidden');
+        });
+        setCountLabel(true);
+        var vis = countVisibleCards();
+        $status.textContent = vis
+          ? ''
+          : 'No providers are currently accepting new clients.';
+      });
     }
 
     $grid.addEventListener('click', function (e) {
@@ -488,66 +466,43 @@
       }
     });
 
-    function getProfileRank(p) {
-      var r =
-        p.profileRank != null ? p.profileRank
-          : p['profile-rank'] != null ? p['profile-rank']
-            : p.profile_rank;
-      if (r === '' || r === null || r === undefined) return 999;
-      if (typeof r === 'string' && r.trim() === '') return 999;
-      var n = Number(r);
-      if (!Number.isFinite(n) || n < 1) return 999;
-      return n;
-    }
-
-    function sortProviders(list) {
-      var pinned = list
-        .filter(function (p) { return getProfileRank(p) < 999; })
-        .sort(function (a, b) { return getProfileRank(a) - getProfileRank(b); });
-      var unpinned = list
-        .filter(function (p) { return getProfileRank(p) >= 999; })
-        .sort(function (a, b) { return firstName(a.name || '').localeCompare(firstName(b.name || '')); });
-      return pinned.concat(unpinned);
-    }
-
     if ($search) $search.value = getQS().get('q') || '';
     if (!isInsuranceLanding) {
       $accepting.value = getQS().get('accepting') || 'yes';
     } else {
       $accepting.value = 'yes';
     }
+    if (!isInsuranceLanding) {
+      var i = getQS().get('insurance') || '';
+      if (i && $insurance) $insurance.value = i;
+    }
 
-    loadFacets()
-      .then(function () {
-        if (isInsuranceLanding) return;
-        var i = getQS().get('insurance') || '';
-        if (i && $insurance) $insurance.value = i;
-      })
-      .then(loadProviders)
-      .catch(function (err) {
-        $status.textContent = 'Error loading directory.';
-        console.error(err);
-      });
+    if (cmsDefaultCount === 0) {
+      $count.textContent = '';
+      $status.textContent = 'Add dietitians in Webflow CMS (Collection List #vd-cms-defaults).';
+    } else {
+      refreshDirectory();
+    }
 
     if ($search) {
       $search.addEventListener(
         'input',
         debounce(function () {
           setQS({ q: $search.value });
-          loadProviders();
+          refreshDirectory();
         }, 350)
       );
     }
     if (!isInsuranceLanding && $insurance) {
       $insurance.addEventListener('change', function () {
         setQS({ insurance: $insurance.value });
-        loadProviders();
+        refreshDirectory();
       });
     }
     if (!isInsuranceLanding) {
       $accepting.addEventListener('change', function () {
         setQS({ accepting: $accepting.value });
-        loadProviders();
+        refreshDirectory();
       });
     }
   }
