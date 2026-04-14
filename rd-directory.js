@@ -1,19 +1,17 @@
 /**
  * Vedic Nutrition — RD directory (mounts into #vedic-rd-directory)
- * Config can live on #vedic-rd-directory OR any ancestor (Webflow wrapper / Section custom attrs).
- * data-vd-main="true" — force main directory (show search/filters) even if a parent has data-fixed-insurance.
- * Insurance SEO: data-fixed-insurance="Anthem" OR URL /insurance/anthem → filter + hide controls (slug → "Anthem").
- * Fixed site header: data-vd-header-offset="96" (px) or "5rem" — top padding so controls aren’t under position:fixed nav (default 88px).
  *
- * API: each provider should include profileStatusRaw (DEFAULT | TRUE | FALSE). DEFAULT = editorial trust, no FreeBusy in accepting-new view.
- * Warm cache from homepage: window.vedicRdPrefetchDefaults(apiBase, apiKey) — see Webflow footer instructions.
+ * DEFAULT providers come from Webflow CMS (Collection List in #vd-cms-defaults) — zero JS, instant paint.
+ * NON-DEFAULT providers come from the API (mode=providers) and are checked via batched mode=availability.
+ *
+ * data-vd-main="true" — force main directory (show search/filters) even if a parent has data-fixed-insurance.
+ * Insurance SEO: data-fixed-insurance="Anthem" OR URL /insurance/anthem → filter + hide controls.
+ * data-vd-header-offset="96" (px) or "5rem" — top padding for fixed nav (default 88px).
  */
 (function () {
   'use strict';
 
-  var SLOT_WINDOW_DAYS = 21; // batch slots call per provider (Apps Script max window)
-  var PREFETCH_DEFAULTS_KEY = 'vedic_rd_prefetch_defaults_v1';
-  var PREFETCH_DEFAULTS_TTL_MS = 90000;
+  var SLOT_WINDOW_DAYS = 21;
 
   var STYLES =
     ':root{--vd-bg:#F3F1E7;--vd-card:#FFFFFF;--vd-border:#e5e7eb;--vd-shadow:0 2px 8px rgba(0,0,0,.06);--vd-shadow-hover:0 6px 20px rgba(0,0,0,.12);--vd-text:#3E3E3E;--vd-muted:#6b7280;--vd-primary:#186AD0;--vd-primary-hover:#1557ab;--vd-accent:#D0A740}' +
@@ -54,58 +52,34 @@
     '.vd-btn:hover{background:var(--vd-primary-hover);border-color:var(--vd-primary-hover);transform:translateY(-2px);box-shadow:0 8px 24px rgba(24,106,208,.35)}' +
     '.vd-count{max-width:1100px;margin:0 auto 8px;font-size:.875rem;color:var(--vd-muted);min-height:1.25em;box-sizing:border-box;padding:0 4px}' +
     '.vd-status{max-width:1100px;margin:8px auto;text-align:center;color:var(--vd-muted);font-size:.875rem;box-sizing:border-box}' +
-    '#vedic-rd-directory #vd-loader{display:flex;align-items:center;justify-content:center;width:100%;max-width:1100px;margin:0 auto;min-height:min(32vh,280px);padding:clamp(2rem,6vw,4.5rem) clamp(1rem,4vw,2rem) clamp(1.75rem,4vw,3rem);box-sizing:border-box;background:transparent}' +
-    '#vedic-rd-directory .vd-loader-inner{width:100%;max-width:26rem;margin:0 auto;text-align:center;font-family:inherit;box-sizing:border-box}' +
-    '#vedic-rd-directory .vd-loader-textwrap{position:relative;min-height:2.6em;display:flex;align-items:center;justify-content:center;margin:0;padding:0 8px 1.125rem;box-sizing:border-box}' +
-    '#vedic-rd-directory .vd-loader-textwrap::after{content:"";position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:min(11rem,72vw);height:2px;border-radius:2px;background:linear-gradient(90deg,transparent 0%,rgba(24,106,208,.2) 20%,rgba(24,106,208,.55) 50%,rgba(24,106,208,.2) 80%,transparent 100%);background-size:200% 100%;animation:vd-loader-sweep 2.4s ease-in-out infinite}' +
-    '@keyframes vd-loader-sweep{0%{background-position:100% 0;opacity:.65}50%{opacity:1}100%{background-position:-100% 0;opacity:.65}}' +
-    '#vedic-rd-directory .vd-loader-headline{margin:0;max-width:100%;font-size:clamp(1.0625rem,2.35vw,1.3125rem);font-weight:400;color:#374151;letter-spacing:-.025em;line-height:1.45;transition:opacity .4s cubic-bezier(.22,1,.36,1),transform .4s cubic-bezier(.22,1,.36,1);overflow-wrap:anywhere;word-wrap:break-word;text-wrap:balance}' +
-    '#vedic-rd-directory .vd-loader-sentence--out{opacity:0;transform:translateY(4px)}' +
-    '#vedic-rd-directory .vd-loader-sentence--in{opacity:1;transform:translateY(0)}' +
-    '#vedic-rd-directory .vd-loader-subline{margin:.75rem 0 0;font-size:.8125rem;font-weight:400;letter-spacing:.005em;color:#6b7280;line-height:1.5;max-width:24rem;margin-left:auto;margin-right:auto;box-sizing:border-box}' +
-    '#vedic-rd-directory #vd-loader.vd-loader--slots .vd-loader-textwrap::after{animation-duration:1.85s}' +
-    '#vedic-rd-directory .vd-loader-subline[hidden]{display:none!important}' +
-    '@media (prefers-reduced-motion:reduce){#vedic-rd-directory .vd-loader-textwrap::after{animation:none;opacity:.45;background:linear-gradient(90deg,transparent,rgba(24,106,208,.35),transparent)}#vedic-rd-directory .vd-loader-headline{transition:opacity .2s ease}}' +
-    '.vd-loader-hidden{display:none!important}' +
     '.vd-card-hidden{display:none!important}' +
-    '.vd-profile-card{position:relative}' +
-    '.vd-card-pending{position:absolute;inset:0;border-radius:16px;background:rgba(255,255,255,.72);backdrop-filter:saturate(1.1) blur(2px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:2;pointer-events:none}' +
-    '.vd-card-pending-text{font-size:.8125rem;font-weight:600;color:#4b5563;letter-spacing:.02em}' +
-    '.vd-card-pending-ring{width:28px;height:28px;border-radius:50%;border:2.5px solid rgba(24,106,208,.2);border-top-color:var(--vd-primary);animation:vd-spin .75s linear infinite;box-sizing:border-box}' +
-    '@keyframes vd-spin{to{transform:rotate(360deg)}}' +
-    '@media (prefers-reduced-motion:reduce){.vd-card-pending-ring{animation:none;border-color:rgba(24,106,208,.45);opacity:.85}}' +
-    '.vd-skeleton-card{pointer-events:none;opacity:.95}' +
-    '.vd-skel-avatar{width:120px;height:120px;border-radius:50%;background:linear-gradient(90deg,#eceae4,#f5f3ed,#eceae4);background-size:200% 100%;animation:vd-shimmer 1.15s ease-in-out infinite;margin:0 auto}' +
-    '.vd-skel-body{flex:1;min-width:0;padding-top:4px}' +
-    '.vd-skel-line{height:11px;border-radius:6px;background:linear-gradient(90deg,#eceae4,#f5f3ed,#eceae4);background-size:200% 100%;animation:vd-shimmer 1.15s ease-in-out infinite;margin:10px 0 0;max-width:100%}' +
-    '.vd-skel-line--lg{max-width:55%;height:16px;margin-top:0}' +
-    '.vd-skel-line--md{max-width:92%}' +
-    '.vd-skel-line--sm{max-width:70%}' +
-    '.vd-skel-line--btn{max-width:200px;height:44px;margin-top:22px;border-radius:12px}' +
-    '@keyframes vd-shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}' +
-    '@media (prefers-reduced-motion:reduce){.vd-skel-avatar,.vd-skel-line{animation:none;background:#e8e6e0}}' +
     '.vd-card-reveal{animation:vd-fade-in .35s ease forwards}' +
     '@keyframes vd-fade-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}' +
-    '@media (max-width:720px){.vd-profile-card{padding:16px;gap:12px;flex-direction:row;flex-wrap:nowrap;align-items:flex-start}.vd-profile-left{flex:0 0 70px}.vd-profile-left img{width:70px;height:70px;border-width:2px}.vd-profile-right{flex:1;min-width:0}.vd-profile-name{font-size:1.1rem}.vd-line{font-size:.8rem}.vd-bio-text{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.vd-bio-text.vd-expanded{display:block;-webkit-line-clamp:unset;line-clamp:unset}.vd-bio-toggle{display:inline-block}.vd-tag-pill{padding:2px 6px;font-size:.6rem;border-radius:8px;border-width:1px;background:transparent}.vd-specialties-wrapper{margin-top:10px}.vd-actions{margin-top:14px;padding-top:14px;border-top-width:1px}.vd-btn{padding:12px 22px;font-size:1rem}#vedic-rd-directory #vd-loader{min-height:min(30vh,300px);padding:2.5rem 1.25rem 2rem}}' +
-    '@media (max-width:479px){.vd-embed-root{width:100vw;max-width:100vw;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);padding-left:max(12px,env(safe-area-inset-left,0));padding-right:max(12px,env(safe-area-inset-right,0))}.vd-profile-card{flex-direction:column;align-items:stretch;padding:14px 12px;gap:14px}.vd-profile-left{align-self:center;flex:0 0 auto}.vd-profile-left img{width:88px;height:88px}.vd-profile-name{text-align:center}.vd-specialties-wrapper{display:none}#vedic-rd-directory #vd-loader{min-height:min(28vh,260px);padding:2rem 12px 1.75rem}#vedic-rd-directory .vd-loader-textwrap{min-height:min(3.5em,20vh);padding-bottom:1rem}#vedic-rd-directory .vd-loader-headline{font-size:clamp(.98rem,4.2vw,1.2rem)}#vedic-rd-directory .vd-loader-subline{font-size:.7rem;margin-top:.5rem}}';
+    '#vd-cms-defaults .w-dyn-items{display:flex;flex-direction:column;gap:16px;max-width:1100px;margin:0 auto;width:100%;box-sizing:border-box;padding:0}' +
+    '#vd-cms-defaults.vd-cms-absorbed{display:none!important}' +
+    '.vd-cms-card .vd-cms-ins ul,.vd-cms-card .vd-cms-ins ol{list-style:none;margin:0;padding:0;display:inline}' +
+    '.vd-cms-card .vd-cms-ins li{display:inline}.vd-cms-card .vd-cms-ins li+li::before{content:", "}' +
+    '.vd-cms-card .vd-cms-tags ul,.vd-cms-card .vd-cms-tags ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}' +
+    '.vd-cms-card .vd-cms-tags li{display:inline-flex;align-items:center;padding:5px 12px;background:#fff;border:1.5px solid var(--vd-accent);color:var(--vd-accent);border-radius:16px;font-size:.75rem;font-weight:600;white-space:nowrap}' +
+    '.vd-cms-card .vd-cms-specs ul,.vd-cms-card .vd-cms-specs ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px;align-items:center}' +
+    '.vd-cms-card .vd-cms-specs li{display:inline-flex;align-items:center;padding:6px 12px;background:#f9fafb;border:1px solid var(--vd-border);border-radius:8px;font-size:.8125rem;color:var(--vd-text);font-weight:500;white-space:nowrap}' +
+    '.vd-cms-card .vd-cms-bio p{margin:0}' +
+    '.vd-api-loading{width:20px;height:20px;border-radius:50%;border:2.5px solid rgba(24,106,208,.18);border-top-color:var(--vd-primary);animation:vd-spin .7s linear infinite;display:inline-block;vertical-align:middle;margin-right:6px;box-sizing:border-box}' +
+    '@keyframes vd-spin{to{transform:rotate(360deg)}}' +
+    '@media (prefers-reduced-motion:reduce){.vd-api-loading{animation:none;border-color:rgba(24,106,208,.45)}}' +
+    '@media (max-width:720px){.vd-profile-card{padding:16px;gap:12px;flex-direction:row;flex-wrap:nowrap;align-items:flex-start}.vd-profile-left{flex:0 0 70px}.vd-profile-left img{width:70px;height:70px;border-width:2px}.vd-profile-right{flex:1;min-width:0}.vd-profile-name{font-size:1.1rem}.vd-line{font-size:.8rem}.vd-bio-text{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.vd-bio-text.vd-expanded{display:block;-webkit-line-clamp:unset;line-clamp:unset}.vd-bio-toggle{display:inline-block}.vd-tag-pill{padding:2px 6px;font-size:.6rem;border-radius:8px;border-width:1px;background:transparent}.vd-specialties-wrapper{margin-top:10px}.vd-actions{margin-top:14px;padding-top:14px;border-top-width:1px}.vd-btn{padding:12px 22px;font-size:1rem}}' +
+    '@media (max-width:479px){.vd-embed-root{width:100vw;max-width:100vw;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);padding-left:max(12px,env(safe-area-inset-left,0));padding-right:max(12px,env(safe-area-inset-right,0))}.vd-profile-card{flex-direction:column;align-items:stretch;padding:14px 12px;gap:14px}.vd-profile-left{align-self:center;flex:0 0 auto}.vd-profile-left img{width:88px;height:88px}.vd-profile-name{text-align:center}.vd-specialties-wrapper{display:none}}';
 
   var INNER_HTML =
     '<div class="vd-embed-root">' +
     '<div class="vd-controls">' +
-    '<input id="vd-search" class="vd-search-input" type="text" name="vd-search" inputmode="search" autocomplete="off" placeholder="Search by name…" aria-label="Search by name" />' +
+    '<input id="vd-search" class="vd-search-input" type="text" name="vd-search" inputmode="search" autocomplete="off" placeholder="Search by name\u2026" aria-label="Search by name" />' +
     '<select id="vd-insurance" aria-label="Insurance"><option value="">All insurances</option></select>' +
     '<select id="vd-accepting" aria-label="Accepting new clients">' +
     '<option value="yes">Accepting new clients: Yes</option>' +
     '<option value="all">Show all dietitians</option>' +
     '</select></div>' +
     '<div id="vd-count" class="vd-count"></div>' +
-    '<div id="vd-loader" class="vd-loader vd-loader-hidden" role="status" aria-live="polite" aria-busy="false">' +
-    '<div class="vd-loader-inner">' +
-    '<div class="vd-loader-textwrap">' +
-    '<p id="vd-loader-sentence" class="vd-loader-headline vd-loader-sentence--in">You\u2019re almost ready to meet your dietitian.</p>' +
-    '</div>' +
-    '<p id="vd-loader-sub" class="vd-loader-subline">Compare profiles and filters \u2014 most people find someone in under a minute.</p>' +
-    '</div></div>' +
     '<div id="vd-grid" class="vd-grid" aria-live="polite"></div>' +
     '<div id="vd-status" class="vd-status"></div>' +
     '</div>';
@@ -118,17 +92,31 @@
     document.head.appendChild(el);
   }
 
+  injectStylesOnce();
+
   function mount(root) {
     injectStylesOnce();
+    var cmsContainer = document.getElementById('vd-cms-defaults');
+    var cmsCards = cmsContainer
+      ? [].slice.call(cmsContainer.querySelectorAll('.vd-cms-card'))
+      : [];
+
     if (!root.querySelector('#vd-grid')) {
       if (!/\bvd-container\b/.test(root.className)) {
         root.className = root.className ? root.className.trim() + ' vd-container' : 'vd-container';
       }
       root.innerHTML = INNER_HTML;
     }
+
+    var grid = root.querySelector('#vd-grid');
+    if (grid && cmsCards.length) {
+      cmsCards.forEach(function (card) {
+        grid.appendChild(card);
+      });
+      if (cmsContainer) cmsContainer.classList.add('vd-cms-absorbed');
+    }
   }
 
-  /** Walk #vedic-rd-directory and ancestors — Webflow often puts CMS custom attrs on a wrapper, not on the mount id. */
   function mergeDirectoryConfig(root) {
     var out = {
       apiBase: '',
@@ -152,27 +140,13 @@
       }
       return '';
     }
-    out.apiBase = pick(function (d) {
-      return d.apiBase;
-    });
-    out.apiKey = pick(function (d) {
-      return d.apiKey;
-    });
-    out.fixedInsurance = pick(function (d) {
-      return d.fixedInsurance;
-    });
-    out.fixedSpecialty = pick(function (d) {
-      return d.fixedSpecialty;
-    });
-    out.fixedTag = pick(function (d) {
-      return d.fixedTag;
-    });
-    out.vdMain = pick(function (d) {
-      return d.vdMain;
-    });
-    out.headerOffset = pick(function (d) {
-      return d.vdHeaderOffset;
-    });
+    out.apiBase = pick(function (d) { return d.apiBase; });
+    out.apiKey = pick(function (d) { return d.apiKey; });
+    out.fixedInsurance = pick(function (d) { return d.fixedInsurance; });
+    out.fixedSpecialty = pick(function (d) { return d.fixedSpecialty; });
+    out.fixedTag = pick(function (d) { return d.fixedTag; });
+    out.vdMain = pick(function (d) { return d.vdMain; });
+    out.headerOffset = pick(function (d) { return d.vdHeaderOffset; });
     return out;
   }
 
@@ -206,16 +180,12 @@
     return slug
       .split(/[-_]+/)
       .filter(Boolean)
-      .map(function (w) {
-        return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
-      })
+      .map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); })
       .join(' ');
   }
 
   function mainFlagTrue(v) {
-    var s = String(v || '')
-      .trim()
-      .toLowerCase();
+    var s = String(v || '').trim().toLowerCase();
     return s === 'true' || s === '1' || s === 'yes';
   }
 
@@ -227,7 +197,6 @@
 
     var merged = mergeDirectoryConfig($root);
     $root.style.setProperty('--vd-header-offset', resolveHeaderOffset($root, merged));
-    // Prefer raw attribute — some Webflow embed runtimes expose dataset inconsistently.
     var forceMain =
       mainFlagTrue($root.getAttribute('data-vd-main')) || mainFlagTrue(merged.vdMain);
 
@@ -240,7 +209,6 @@
     var DEFAULT_API =
       'https://script.google.com/macros/s/AKfycbxev-lmv8hBefUnj48SMY_B6Hdrzw-UtxF0k-aIxrum5PkRnWeY_QC2hEzKIWm_GqQpcQ/exec';
     var API_BASE = merged.apiBase || DEFAULT_API;
-    var SLOTS_API = API_BASE;
     var API_KEY = merged.apiKey || '';
 
     var isInsuranceLanding = !!fixedIns;
@@ -254,113 +222,20 @@
     var $grid = $root.querySelector('#vd-grid');
     var $count = $root.querySelector('#vd-count');
     var $status = $root.querySelector('#vd-status');
-    var $loader = $root.querySelector('#vd-loader');
-    var $loaderSentence = $root.querySelector('#vd-loader-sentence');
-    var $loaderSub = $root.querySelector('#vd-loader-sub');
-
-    var LOADER_MS_EARLY = 2600;
-    var LOADER_MS_SLOTS = 2400;
-    var LOADER_LINES_EARLY = [
-      "You're almost ready to meet your dietitian.",
-      'Finding registered dietitians who fit your goals and insurance.',
-      'Personalizing what you see — credentials, specialties, and coverage.',
-    ];
-    var LOADER_LINES_SLOTS = [
-      'Pulling live openings so we only show dietitians you can book soon.',
-      'Almost there — your next step is choosing who you would like to see.',
-      'Availability updates in real time. Popular slots can change quickly.',
-    ];
-    var loaderNarrativeTimer = null;
-    var loaderLineIndex = 0;
-    var loaderLinesActive = LOADER_LINES_EARLY;
-    var loaderTickMs = LOADER_MS_EARLY;
-
-    function stopLoaderNarrative() {
-      if (loaderNarrativeTimer) {
-        clearInterval(loaderNarrativeTimer);
-        loaderNarrativeTimer = null;
-      }
-    }
-
-    function runLoaderTick() {
-      var lineEl = $loaderSentence;
-      if (!lineEl || !$loader || $loader.classList.contains('vd-loader-hidden')) return;
-      lineEl.classList.remove('vd-loader-sentence--in');
-      lineEl.classList.add('vd-loader-sentence--out');
-      window.setTimeout(function () {
-        loaderLineIndex = (loaderLineIndex + 1) % loaderLinesActive.length;
-        lineEl.textContent = loaderLinesActive[loaderLineIndex];
-        lineEl.classList.remove('vd-loader-sentence--out');
-        void lineEl.offsetWidth;
-        lineEl.classList.add('vd-loader-sentence--in');
-      }, 320);
-    }
-
-    function startLoaderNarrative() {
-      stopLoaderNarrative();
-      loaderLinesActive = LOADER_LINES_EARLY;
-      loaderLineIndex = 0;
-      loaderTickMs = LOADER_MS_EARLY;
-      if ($loader) {
-        $loader.classList.remove('vd-loader--slots');
-      }
-      if ($loaderSentence) {
-        $loaderSentence.textContent = loaderLinesActive[0];
-        $loaderSentence.classList.remove('vd-loader-sentence--out');
-        $loaderSentence.classList.add('vd-loader-sentence--in');
-      }
-      if ($loaderSub) {
-        $loaderSub.textContent =
-          'Compare profiles and filters — most people find someone in under a minute.';
-        $loaderSub.removeAttribute('hidden');
-      }
-      loaderNarrativeTimer = setInterval(runLoaderTick, loaderTickMs);
-    }
-
-    function setLoaderPhaseSlots(nProviders) {
-      loaderLinesActive = LOADER_LINES_SLOTS;
-      loaderLineIndex = 0;
-      loaderTickMs = LOADER_MS_SLOTS;
-      if ($loader) {
-        $loader.classList.add('vd-loader--slots');
-      }
-      if ($loaderSentence) {
-        $loaderSentence.textContent = loaderLinesActive[0];
-        $loaderSentence.classList.remove('vd-loader-sentence--out');
-        $loaderSentence.classList.add('vd-loader-sentence--in');
-      }
-      if ($loaderSub) {
-        $loaderSub.textContent =
-          'Checking live calendars across ' +
-          nProviders +
-          ' dietitian' +
-          (nProviders === 1 ? '' : 's') +
-          ' — then you will see who has openings.';
-        $loaderSub.removeAttribute('hidden');
-      }
-      stopLoaderNarrative();
-      loaderNarrativeTimer = setInterval(runLoaderTick, loaderTickMs);
-    }
-
-    function showMeetLoader() {
-      if (!$loader) return;
-      $loader.classList.remove('vd-loader-hidden');
-      $loader.setAttribute('aria-busy', 'true');
-      startLoaderNarrative();
-    }
-
-    function hideMeetLoader() {
-      stopLoaderNarrative();
-      if (!$loader) return;
-      $loader.classList.add('vd-loader-hidden');
-      $loader.classList.remove('vd-loader--slots');
-      $loader.setAttribute('aria-busy', 'false');
-    }
     var $search = $root.querySelector('#vd-search');
     var $insurance = $root.querySelector('#vd-insurance');
     var $accepting = $root.querySelector('#vd-accepting');
 
     if (!$grid || !$accepting) return;
+
+    var cmsSlugSet = {};
+    [].slice.call($grid.querySelectorAll('.vd-cms-card')).forEach(function (el) {
+      var s = (el.getAttribute('data-slug') || '').trim().toLowerCase();
+      if (s) cmsSlugSet[s] = true;
+    });
+    var cmsDefaultCount = Object.keys(cmsSlugSet).length;
+
+    upgradeCmsCards($grid);
 
     var ctrlBar = $root.querySelector('.vd-controls');
     if (isInsuranceLanding) {
@@ -391,16 +266,16 @@
       }
     }
 
-    function getQS() {
-      return new URLSearchParams(location.search);
+    if (cmsDefaultCount > 0) {
+      $count.textContent = cmsDefaultCount + ' dietitian' + (cmsDefaultCount !== 1 ? 's' : '');
     }
+
+    function getQS() { return new URLSearchParams(location.search); }
     function setQS(params) {
       var next = new URLSearchParams(location.search);
       Object.entries(params).forEach(function (kv) {
-        var k = kv[0];
-        var v = kv[1];
-        if (v == null || v === '') next.delete(k);
-        else next.set(k, v);
+        if (kv[1] == null || kv[1] === '') next.delete(kv[0]);
+        else next.set(kv[0], kv[1]);
       });
       history.replaceState({}, '', location.pathname + '?' + next.toString());
     }
@@ -427,9 +302,7 @@
       return function () {
         var args = arguments;
         clearTimeout(t);
-        t = setTimeout(function () {
-          fn.apply(null, args);
-        }, ms);
+        t = setTimeout(function () { fn.apply(null, args); }, ms);
       };
     }
 
@@ -452,58 +325,41 @@
       });
     }
 
-    function readPrefetchDefaults() {
-      try {
-        var raw = sessionStorage.getItem(PREFETCH_DEFAULTS_KEY);
-        if (!raw) return null;
-        var o = JSON.parse(raw);
-        if (!o || !o.ts || Date.now() - o.ts > PREFETCH_DEFAULTS_TTL_MS) return null;
-        return Array.isArray(o.providers) && o.providers.length ? o.providers : null;
-      } catch (e) {
-        return null;
-      }
+    function batchCheckAvailability(ids) {
+      if (!ids || !ids.length) return Promise.resolve({});
+      return api({
+        mode: 'availability',
+        ids: ids.join(','),
+        days: String(SLOT_WINDOW_DAYS),
+      }).then(function (data) {
+        return (data && data.ok && data.availability) ? data.availability : {};
+      }).catch(function () {
+        return {};
+      });
     }
 
-    function showSkeletonGrid(n) {
-      n = Math.max(1, Math.min(12, n || 4));
-      var parts = [];
-      for (var i = 0; i < n; i++) {
-        parts.push(
-          '<div class="vd-profile-card vd-skeleton-card" aria-hidden="true">' +
-            '<div class="vd-profile-left"><div class="vd-skel-avatar"></div></div>' +
-            '<div class="vd-profile-right vd-skel-body">' +
-            '<div class="vd-skel-line vd-skel-line--lg"></div>' +
-            '<div class="vd-skel-line vd-skel-line--md"></div>' +
-            '<div class="vd-skel-line vd-skel-line--sm"></div>' +
-            '<div class="vd-skel-line vd-skel-line--btn"></div>' +
-            '</div></div>'
-        );
-      }
-      $grid.innerHTML = parts.join('');
+    function clearApiCards() {
+      [].slice.call($grid.querySelectorAll('.vd-api-card')).forEach(function (el) {
+        el.remove();
+      });
     }
 
     function loadProviders() {
+      clearApiCards();
       $status.textContent = '';
-      $grid.innerHTML = '';
-      $count.textContent = '';
-      hideMeetLoader();
 
       var acceptingYes = isInsuranceLanding || $accepting.value === 'yes';
       var insVal = fixedIns || ($insurance && $insurance.value) || '';
-      var canUsePrefetch =
-        acceptingYes &&
-        !($search && $search.value) &&
-        !fixedSpec &&
-        !fixedTagVal &&
-        (isInsuranceLanding || !insVal);
-      var pref = canUsePrefetch ? readPrefetchDefaults() : null;
 
-      if (pref && pref.length) {
-        render(sortProviders(pref), true);
+      if (cmsDefaultCount === 0) {
+        $status.textContent = acceptingYes
+          ? '<span class="vd-api-loading" aria-hidden="true"></span>Loading dietitians\u2026'
+          : 'Loading providers\u2026';
+        $status.innerHTML = $status.textContent;
       } else if (acceptingYes) {
-        showSkeletonGrid(6);
-      } else {
-        showSkeletonGrid(4);
+        $count.textContent =
+          cmsDefaultCount + ' dietitian' + (cmsDefaultCount !== 1 ? 's' : '') +
+          ' \u00b7 loading more\u2026';
       }
 
       var params = {
@@ -516,135 +372,36 @@
       if (insVal) params.insurance = insVal;
       if (fixedSpec) params.specialty = fixedSpec;
       if (fixedTagVal) params.tag = fixedTagVal;
-      if (isInsuranceLanding && insVal) params.mergeDefaultProfiles = 'true';
 
       return api(params)
         .then(function (data) {
           if (!data.ok) throw new Error(data.error || 'Load failed');
 
-          render(sortProviders(data.providers || []), acceptingYes);
+          var providers = (data.providers || []).filter(function (p) {
+            var s = String(p.slug || '').trim().toLowerCase();
+            return !cmsSlugSet[s];
+          });
 
           if (acceptingYes) {
-            $status.textContent = '';
-            return applyAcceptingFilter();
-          }
-          $count.textContent = (data.total || 0) + ' dietitians found';
-          $status.textContent = data.total ? '' : 'No matching providers.';
-        })
-        .finally(function () {
-          hideMeetLoader();
-        });
-    }
-
-    /** One API call per provider: multi-day slots, then test for on-the-hour future openings */
-    function providerHasOpenSlots(id, email) {
-      if (!id && !email) return Promise.resolve(false);
-      var p = new URLSearchParams({ mode: 'slots', days: String(SLOT_WINDOW_DAYS) });
-      if (id) p.set('id', id);
-      if (email) p.set('email', email);
-      if (API_KEY) p.set('key', API_KEY);
-      return fetch(SLOTS_API + '?' + p.toString(), { cache: 'no-store', credentials: 'omit' })
-        .then(function (res) {
-          if (!res.ok) return false;
-          return res.json();
-        })
-        .then(function (data) {
-          if (!data || !data.ok) return false;
-          var now = new Date();
-          var slotList = [];
-          if (data.slots && data.slots.length) slotList = data.slots;
-          else if (data.slotsByDate && typeof data.slotsByDate === 'object') {
-            Object.keys(data.slotsByDate).forEach(function (k) {
-              var arr = data.slotsByDate[k];
-              if (arr && arr.length) slotList = slotList.concat(arr);
+            var ids = providers.map(function (p) { return p.id; }).filter(Boolean);
+            return batchCheckAvailability(ids).then(function (avail) {
+              var available = providers.filter(function (p) { return avail[p.id]; });
+              renderApiCards(sortProviders(available));
+              var total = cmsDefaultCount + available.length;
+              $count.textContent = total + ' dietitian' + (total !== 1 ? 's' : '') + ' with openings soon';
+              $status.textContent = total ? '' : 'No providers are currently accepting new clients.';
             });
           }
-          return slotList.some(function (iso) {
-            try {
-              var dt = new Date(iso);
-              return dt.getMinutes() === 0 && dt > now;
-            } catch (e) {
-              return false;
-            }
-          });
+
+          renderApiCards(sortProviders(providers));
+          var total = cmsDefaultCount + providers.length;
+          $count.textContent = total + ' dietitians found';
+          $status.textContent = total ? '' : 'No matching providers.';
         })
-        .catch(function () {
-          return false;
+        .catch(function (err) {
+          $status.textContent = 'Error loading directory.';
+          console.error(err);
         });
-    }
-
-    function applyAcceptingFilter() {
-      var cards = [].slice.call($grid.querySelectorAll('.vd-profile-card'));
-      if (!cards.length) {
-        hideMeetLoader();
-        $count.textContent = '';
-        $status.textContent = 'No matching providers.';
-        return Promise.resolve();
-      }
-
-      var visible = 0;
-      var pendingSlotChecks = 0;
-
-      function updateAcceptingCount() {
-        if (pendingSlotChecks > 0) {
-          if (visible > 0) {
-            $count.textContent =
-              'Showing ' +
-              visible +
-              ' now \u00b7 checking openings for ' +
-              pendingSlotChecks +
-              ' more\u2026';
-          } else {
-            $count.textContent = 'Checking calendars for openings\u2026';
-          }
-        } else {
-          $count.textContent =
-            visible + ' dietitian' + (visible !== 1 ? 's' : '') + ' with openings soon';
-        }
-      }
-
-      cards.forEach(function (card) {
-        var ps = (card.getAttribute('data-profile-status') || '').trim().toUpperCase();
-        if (ps === 'DEFAULT') {
-          visible++;
-        }
-      });
-
-      var needSlots = cards.filter(function (card) {
-        return (card.getAttribute('data-profile-status') || '').trim().toUpperCase() !== 'DEFAULT';
-      });
-      pendingSlotChecks = needSlots.length;
-      updateAcceptingCount();
-
-      return Promise.all(
-        cards.map(function (card) {
-          var ps = (card.getAttribute('data-profile-status') || '').trim().toUpperCase();
-          if (ps === 'DEFAULT') {
-            return Promise.resolve();
-          }
-          return providerHasOpenSlots(card.dataset.id || '', card.dataset.email || '').then(function (open) {
-            pendingSlotChecks = Math.max(0, pendingSlotChecks - 1);
-            removeCardPendingOverlay(card);
-            if (open) {
-              card.classList.remove('vd-card-hidden');
-              visible++;
-            } else {
-              card.classList.add('vd-card-hidden');
-            }
-            updateAcceptingCount();
-          });
-        })
-      ).then(function () {
-        hideMeetLoader();
-        pendingSlotChecks = 0;
-        if (!visible) {
-          $status.textContent = 'No providers are currently accepting new clients.';
-          $count.textContent = '';
-        } else {
-          $count.textContent =
-            visible + ' dietitian' + (visible !== 1 ? 's' : '') + ' with openings soon';
-        }
-      });
     }
 
     function escapeHtml(s) {
@@ -659,28 +416,7 @@
       return (full || '').split(' ')[0] || 'Provider';
     }
 
-    /** profileStatusRaw from API (DEFAULT | TRUE | FALSE). DEFAULT = show in accepting-new flow without FreeBusy. */
-    function getProfileStatus(p) {
-      if (p.profileStatusRaw != null && String(p.profileStatusRaw).trim() !== '') {
-        return String(p.profileStatusRaw).trim().toUpperCase();
-      }
-      var s =
-        p.profileStatus != null
-          ? p.profileStatus
-          : p['profile-status'] != null
-            ? p['profile-status']
-            : p.profile_status;
-      if (s == null || s === '') return '';
-      if (typeof s === 'boolean') return s ? 'TRUE' : 'FALSE';
-      return String(s).trim().toUpperCase();
-    }
-
-    function removeCardPendingOverlay(card) {
-      var o = card.querySelector('.vd-card-pending');
-      if (o) o.remove();
-    }
-
-    function cardHtml(p, acceptingMode) {
+    function cardHtml(p) {
       var slug = String(p.slug || '').trim();
       var href = slug ? BOOK_PATH_PREFIX + '/' + encodeURIComponent(slug) : '#';
       var specs = (p.specialties || []).map(escapeHtml);
@@ -694,9 +430,7 @@
 
       var tagsHtml = tags.length
         ? '<div class="vd-tags-wrapper"><div class="vd-tags">' +
-          tags.map(function (t) {
-            return '<span class="vd-tag-pill">' + t + '</span>';
-          }).join('') +
+          tags.map(function (t) { return '<span class="vd-tag-pill">' + t + '</span>'; }).join('') +
           '</div></div>'
         : '';
 
@@ -706,88 +440,35 @@
           '</div><button type="button" class="vd-bio-toggle">View more</button></div>'
         : '';
 
-      var visSpec = vis
-        .map(function (s) {
-          return '<span class="vd-specialty-tag">' + s + '</span>';
-        })
-        .join('');
-      var hidSpec = hid
-        .map(function (s) {
-          return '<span class="vd-specialty-tag">' + s + '</span>';
-        })
-        .join('');
+      var visSpec = vis.map(function (s) { return '<span class="vd-specialty-tag">' + s + '</span>'; }).join('');
+      var hidSpec = hid.map(function (s) { return '<span class="vd-specialty-tag">' + s + '</span>'; }).join('');
       var moreSpec =
         hid.length > 0
-          ? '<span class="vd-hidden-spec">' +
-            hidSpec +
-            '</span><button type="button" class="vd-more-spec">+More</button>'
+          ? '<span class="vd-hidden-spec">' + hidSpec + '</span><button type="button" class="vd-more-spec">+More</button>'
           : '';
 
-      var st = getProfileStatus(p);
-      var needsSlotCheck = acceptingMode && st !== 'DEFAULT';
-      var pendingOverlay = needsSlotCheck
-        ? '<div class="vd-card-pending" role="status" aria-live="polite"><span class="vd-card-pending-ring" aria-hidden="true"></span><span class="vd-card-pending-text">Checking openings\u2026</span></div>'
-        : '';
-
       return (
-        '<div class="vd-profile-card' +
-        '" data-id="' +
-        escapeAttr(p.id || '') +
-        '" data-email="' +
-        escapeAttr(p.email || '') +
-        '" data-profile-status="' +
-        escapeAttr(st) +
-        '">' +
+        '<div class="vd-profile-card vd-api-card vd-card-reveal" data-id="' +
+        escapeAttr(p.id || '') + '" data-email="' + escapeAttr(p.email || '') + '">' +
         '<div class="vd-profile-left"><img src="' +
-        escapeAttr(p.photoUrl || '') +
-        '" alt="' +
-        escapeAttr(p.name || 'Dietitian') +
+        escapeAttr(p.photoUrl || '') + '" alt="' + escapeAttr(p.name || 'Dietitian') +
         '" loading="lazy"></div>' +
         '<div class="vd-profile-right">' +
-        '<div class="vd-profile-name">' +
-        safeName +
-        (safeCred ? ', ' + safeCred : '') +
-        '</div>' +
-        '<div class="vd-line"><strong>Insurances:</strong> ' +
-        ins.join(', ') +
-        '</div>' +
-        tagsHtml +
-        bioHtml +
+        '<div class="vd-profile-name">' + safeName + (safeCred ? ', ' + safeCred : '') + '</div>' +
+        '<div class="vd-line"><strong>Insurances:</strong> ' + ins.join(', ') + '</div>' +
+        tagsHtml + bioHtml +
         '<div class="vd-specialties-wrapper"><span class="vd-specialties-label">Specialties:</span><div class="vd-specialties">' +
-        visSpec +
-        moreSpec +
-        '</div></div>' +
-        '<div class="vd-actions"><a class="vd-btn" href="' +
-        escapeAttr(href) +
-        '" target="_self">Book with ' +
-        escapeHtml(firstName(p.name || '')) +
-        '</a></div>' +
-        '</div>' +
-        pendingOverlay +
-        '</div>'
+        visSpec + moreSpec + '</div></div>' +
+        '<div class="vd-actions"><a class="vd-btn" href="' + escapeAttr(href) +
+        '" target="_self">Book with ' + escapeHtml(firstName(p.name || '')) + '</a></div>' +
+        '</div></div>'
       );
     }
 
-    function render(list, acceptingMode) {
-      $grid.innerHTML = list
-        .map(function (p) {
-          return cardHtml(p, acceptingMode);
-        })
-        .join('');
-      if (!acceptingMode) {
-        [].slice.call($grid.querySelectorAll('.vd-profile-card')).forEach(function (el) {
-          el.classList.remove('vd-card-hidden');
-          removeCardPendingOverlay(el);
-        });
-      } else {
-        [].slice.call($grid.querySelectorAll('.vd-profile-card')).forEach(function (el) {
-          var ps = (el.getAttribute('data-profile-status') || '').trim().toUpperCase();
-          el.classList.add('vd-card-reveal');
-          if (ps === 'DEFAULT') {
-            el.classList.remove('vd-card-hidden');
-          }
-        });
-      }
+    function renderApiCards(list) {
+      if (!list.length) return;
+      var html = list.map(function (p) { return cardHtml(p); }).join('');
+      $grid.insertAdjacentHTML('beforeend', html);
     }
 
     $grid.addEventListener('click', function (e) {
@@ -809,10 +490,8 @@
 
     function getProfileRank(p) {
       var r =
-        p.profileRank != null
-          ? p.profileRank
-          : p['profile-rank'] != null
-            ? p['profile-rank']
+        p.profileRank != null ? p.profileRank
+          : p['profile-rank'] != null ? p['profile-rank']
             : p.profile_rank;
       if (r === '' || r === null || r === undefined) return 999;
       if (typeof r === 'string' && r.trim() === '') return 999;
@@ -823,19 +502,11 @@
 
     function sortProviders(list) {
       var pinned = list
-        .filter(function (p) {
-          return getProfileRank(p) < 999;
-        })
-        .sort(function (a, b) {
-          return getProfileRank(a) - getProfileRank(b);
-        });
+        .filter(function (p) { return getProfileRank(p) < 999; })
+        .sort(function (a, b) { return getProfileRank(a) - getProfileRank(b); });
       var unpinned = list
-        .filter(function (p) {
-          return getProfileRank(p) >= 999;
-        })
-        .sort(function (a, b) {
-          return firstName(a.name || '').localeCompare(firstName(b.name || ''));
-        });
+        .filter(function (p) { return getProfileRank(p) >= 999; })
+        .sort(function (a, b) { return firstName(a.name || '').localeCompare(firstName(b.name || '')); });
       return pinned.concat(unpinned);
     }
 
@@ -854,7 +525,6 @@
       })
       .then(loadProviders)
       .catch(function (err) {
-        hideMeetLoader();
         $status.textContent = 'Error loading directory.';
         console.error(err);
       });
@@ -882,30 +552,34 @@
     }
   }
 
-  /** Homepage/footer: warm sessionStorage so Meet our dietitians can paint DEFAULT rows before the full providers response. */
-  window.vedicRdPrefetchDefaults = function (apiBase, apiKey) {
-    var base = apiBase && String(apiBase).trim();
-    if (!base) return;
-    var u =
-      base +
-      (base.indexOf('?') >= 0 ? '&' : '?') +
-      'mode=providers&surface=profile&activeOnly=true&sort=name&defaultOnly=true';
-    if (apiKey) u += '&key=' + encodeURIComponent(apiKey);
-    fetch(u, { credentials: 'omit' })
-      .then(function (r) {
-        return r.json();
-      })
-      .then(function (d) {
-        if (!d || !d.ok || !d.providers || !d.providers.length) return;
-        try {
-          sessionStorage.setItem(
-            PREFETCH_DEFAULTS_KEY,
-            JSON.stringify({ ts: Date.now(), providers: d.providers })
-          );
-        } catch (e) {}
-      })
-      .catch(function () {});
-  };
+  function upgradeCmsCards(grid) {
+    [].slice.call(grid.querySelectorAll('.vd-cms-card')).forEach(function (card) {
+      var btn = card.querySelector('.vd-btn');
+      if (btn) {
+        var name = (card.getAttribute('data-name') || '').trim();
+        if (name) btn.textContent = 'Book with ' + name.split(' ')[0];
+      }
+
+      var specsWrap = card.querySelector('.vd-cms-specs');
+      if (specsWrap) {
+        var items = [].slice.call(specsWrap.querySelectorAll('li'));
+        if (items.length > 3) {
+          items.slice(3).forEach(function (li) { li.style.display = 'none'; li.classList.add('vd-cms-hidden-spec'); });
+          var moreBtn = document.createElement('button');
+          moreBtn.type = 'button';
+          moreBtn.className = 'vd-more-spec';
+          moreBtn.textContent = '+More';
+          moreBtn.addEventListener('click', function () {
+            var hidden = specsWrap.querySelectorAll('.vd-cms-hidden-spec');
+            var showing = hidden.length && hidden[0].style.display !== 'none' ? false : true;
+            [].slice.call(hidden).forEach(function (li) { li.style.display = showing ? '' : 'none'; });
+            moreBtn.textContent = showing ? 'Less' : '+More';
+          });
+          specsWrap.appendChild(moreBtn);
+        }
+      }
+    });
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', main);
