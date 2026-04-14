@@ -1,29 +1,25 @@
 /**
  * Vedic Nutrition — RD directory (mounts into #vedic-rd-directory)
  *
- * All cards come from Webflow CMS (Collection List in #vd-cms-defaults). Sort, rank, and “status”
- * (e.g. DEFAULT vs live calendar) are CMS fields — not the Google Sheet.
- * The API is used only for batched availability: POST mode=availabilityBatch with calendar payloads
- * read from data-* attributes on each card.
+ * Source of truth: Google Sheet via Apps Script API.
+ *   mode=providers  — full roster (surface=profile, activeOnly)
+ *   mode=facets     — insurance list for main-page dropdown
+ *   mode=availability — batched FreeBusy, early-exit per calendar
  *
- * Card attributes:
- *   data-slug — stable id for API availability keys (required)
- *   data-vd-default="true" — editorial / skip FreeBusy (always counts as “accepting”); always listed
- *   data-vd-in-directory="false" — hide card everywhere (even “Show all”), same as sheet profile FALSE;
- *     omitted or true = listed. Editorial (data-vd-default) overrides and always lists.
- *   data-calendar-id (or data-calendar) — Google Calendar id; optional data-email as calendar id
- *   data-tz — IANA timezone (default America/Chicago)
- *   data-start-time / data-end-time — e.g. 9:00 AM / 7:00 PM
- *   data-vd-insurances — comma list for main-page insurance filter (optional; if omitted, insurance filter does not hide the card)
+ * DEFAULT providers render instantly (no FreeBusy).
+ * TRUE providers render blurred + spinner, then unblur/hide after availability check.
+ * FALSE / inactive rows are excluded server-side.
  *
- * data-vd-main="true" — force main directory (show search/filters) even if a parent has data-fixed-insurance.
- * Insurance SEO: data-fixed-insurance="Anthem" OR URL /insurance/anthem → filter + hide controls.
- * data-vd-header-offset="96" (px) or "5rem" — top padding for fixed nav (default 88px).
+ * Embeds:
+ *   Main page:     data-vd-main="true"
+ *   Insurance SEO: data-fixed-insurance="Anthem"  (or URL /insurance/anthem)
  */
 (function () {
   'use strict';
 
   var SLOT_WINDOW_DAYS = 21;
+  var SKELETON_COUNT = 3;
+  var BOOK_PATH = '/dietitians';
 
   var STYLES =
     ':root{--vd-bg:#F3F1E7;--vd-card:#FFFFFF;--vd-border:#e5e7eb;--vd-shadow:0 2px 8px rgba(0,0,0,.06);--vd-shadow-hover:0 6px 20px rgba(0,0,0,.12);--vd-text:#3E3E3E;--vd-muted:#6b7280;--vd-primary:#186AD0;--vd-primary-hover:#1557ab;--vd-accent:#D0A740}' +
@@ -36,7 +32,7 @@
     '#vedic-rd-directory input.vd-search-input::placeholder,#vedic-rd-directory #vd-search::placeholder{color:var(--vd-muted)}' +
     '.vd-controls select{border:1px solid var(--vd-border);border-radius:8px;padding:10px 14px;font-size:15px;flex:1 1 180px;min-height:44px;background:#fff;color:var(--vd-text);box-sizing:border-box}' +
     '.vd-grid{display:flex;flex-direction:column;gap:16px;max-width:1100px;margin:0 auto;width:100%;box-sizing:border-box;padding:0 0 24px}' +
-    '.vd-profile-card{border:1px solid var(--vd-border);border-radius:16px;padding:28px;box-shadow:var(--vd-shadow);display:flex;gap:28px;flex-wrap:wrap;background:var(--vd-card);transition:box-shadow .3s ease;overflow:visible;box-sizing:border-box;min-width:0}' +
+    '.vd-profile-card{border:1px solid var(--vd-border);border-radius:16px;padding:28px;box-shadow:var(--vd-shadow);display:flex;gap:28px;flex-wrap:wrap;background:var(--vd-card);transition:box-shadow .3s ease;overflow:visible;box-sizing:border-box;min-width:0;position:relative}' +
     '.vd-profile-card:hover{box-shadow:var(--vd-shadow-hover)}' +
     '.vd-profile-left{flex:0 0 120px;text-align:center;min-width:0}' +
     '.vd-profile-left img{width:120px;height:120px;border-radius:50%;object-fit:cover;border:3px solid var(--vd-border);display:block;margin:0 auto}' +
@@ -67,20 +63,21 @@
     '.vd-card-hidden{display:none!important}' +
     '.vd-card-reveal{animation:vd-fade-in .35s ease forwards}' +
     '@keyframes vd-fade-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}' +
-    '#vd-cms-defaults .w-dyn-items{display:flex;flex-direction:column;gap:16px;max-width:1100px;margin:0 auto;width:100%;box-sizing:border-box;padding:0}' +
-    '#vd-cms-defaults.vd-cms-absorbed{display:none!important}' +
-    '.vd-cms-card .vd-cms-ins ul,.vd-cms-card .vd-cms-ins ol{list-style:none;margin:0;padding:0;display:inline}' +
-    '.vd-cms-card .vd-cms-ins li{display:inline}.vd-cms-card .vd-cms-ins li+li::before{content:", "}' +
-    '.vd-cms-card .vd-cms-tags ul,.vd-cms-card .vd-cms-tags ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}' +
-    '.vd-cms-card .vd-cms-tags li{display:inline-flex;align-items:center;padding:5px 12px;background:#fff;border:1.5px solid var(--vd-accent);color:var(--vd-accent);border-radius:16px;font-size:.75rem;font-weight:600;white-space:nowrap}' +
-    '.vd-cms-card .vd-cms-specs ul,.vd-cms-card .vd-cms-specs ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px;align-items:center}' +
-    '.vd-cms-card .vd-cms-specs li{display:inline-flex;align-items:center;padding:6px 12px;background:#f9fafb;border:1px solid var(--vd-border);border-radius:8px;font-size:.8125rem;color:var(--vd-text);font-weight:500;white-space:nowrap}' +
-    '.vd-cms-card .vd-cms-bio p{margin:0}' +
-    '.vd-api-loading{width:20px;height:20px;border-radius:50%;border:2.5px solid rgba(24,106,208,.18);border-top-color:var(--vd-primary);animation:vd-spin .7s linear infinite;display:inline-block;vertical-align:middle;margin-right:6px;box-sizing:border-box}' +
-    '@keyframes vd-spin{to{transform:rotate(360deg)}}' +
-    '@media (prefers-reduced-motion:reduce){.vd-api-loading{animation:none;border-color:rgba(24,106,208,.45)}}' +
-    '@media (max-width:720px){.vd-profile-card{padding:16px;gap:12px;flex-direction:row;flex-wrap:nowrap;align-items:flex-start}.vd-profile-left{flex:0 0 70px}.vd-profile-left img{width:70px;height:70px;border-width:2px}.vd-profile-right{flex:1;min-width:0}.vd-profile-name{font-size:1.1rem}.vd-line{font-size:.8rem}.vd-bio-text{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.vd-bio-text.vd-expanded{display:block;-webkit-line-clamp:unset;line-clamp:unset}.vd-bio-toggle{display:inline-block}.vd-tag-pill{padding:2px 6px;font-size:.6rem;border-radius:8px;border-width:1px;background:transparent}.vd-specialties-wrapper{margin-top:10px}.vd-actions{margin-top:14px;padding-top:14px;border-top-width:1px}.vd-btn{padding:12px 22px;font-size:1rem}}' +
-    '@media (max-width:479px){.vd-embed-root{width:100vw;max-width:100vw;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);padding-left:max(12px,env(safe-area-inset-left,0));padding-right:max(12px,env(safe-area-inset-right,0))}.vd-profile-card{flex-direction:column;align-items:stretch;padding:14px 12px;gap:14px}.vd-profile-left{align-self:center;flex:0 0 auto}.vd-profile-left img{width:88px;height:88px}.vd-profile-name{text-align:center}.vd-specialties-wrapper{display:none}}';
+    '.vd-skeleton{border:1px solid var(--vd-border);border-radius:16px;padding:28px;background:var(--vd-card);display:flex;gap:28px;min-height:160px;animation:vd-pulse 1.4s ease-in-out infinite}' +
+    '.vd-skeleton-avatar{width:120px;height:120px;border-radius:50%;background:#e5e7eb;flex-shrink:0}' +
+    '.vd-skeleton-lines{flex:1;display:flex;flex-direction:column;gap:12px;padding-top:8px}' +
+    '.vd-skeleton-line{height:14px;background:#e5e7eb;border-radius:6px}' +
+    '.vd-skeleton-line:first-child{width:45%;height:20px}' +
+    '.vd-skeleton-line:nth-child(2){width:70%}' +
+    '.vd-skeleton-line:nth-child(3){width:55%}' +
+    '.vd-skeleton-line:nth-child(4){width:35%}' +
+    '@keyframes vd-pulse{0%,100%{opacity:1}50%{opacity:.45}}' +
+    '.vd-card-checking .vd-profile-left,.vd-card-checking .vd-profile-right{filter:blur(4px);opacity:.5;transition:filter .4s ease,opacity .4s ease;pointer-events:none;-webkit-user-select:none;user-select:none}' +
+    '.vd-card-checking::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;border-radius:50%;border:3px solid rgba(24,106,208,.15);border-top-color:var(--vd-primary);animation:vd-spin .7s linear infinite;z-index:2}' +
+    '@keyframes vd-spin{to{transform:translate(-50%,-50%) rotate(360deg)}}' +
+    '@media (prefers-reduced-motion:reduce){.vd-skeleton,.vd-card-checking::after{animation:none}}' +
+    '@media (max-width:720px){.vd-profile-card{padding:16px;gap:12px;flex-direction:row;flex-wrap:nowrap;align-items:flex-start}.vd-profile-left{flex:0 0 70px}.vd-profile-left img{width:70px;height:70px;border-width:2px}.vd-profile-right{flex:1;min-width:0}.vd-profile-name{font-size:1.1rem}.vd-line{font-size:.8rem}.vd-bio-text{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.vd-bio-text.vd-expanded{display:block;-webkit-line-clamp:unset;line-clamp:unset}.vd-bio-toggle{display:inline-block}.vd-tag-pill{padding:2px 6px;font-size:.6rem;border-radius:8px;border-width:1px;background:transparent}.vd-specialties-wrapper{margin-top:10px}.vd-actions{margin-top:14px;padding-top:14px;border-top-width:1px}.vd-btn{padding:12px 22px;font-size:1rem}.vd-skeleton{padding:16px;gap:12px;min-height:100px}.vd-skeleton-avatar{width:70px;height:70px}}' +
+    '@media (max-width:479px){.vd-embed-root{width:100vw;max-width:100vw;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);padding-left:max(12px,env(safe-area-inset-left,0));padding-right:max(12px,env(safe-area-inset-right,0))}.vd-profile-card{flex-direction:column;align-items:stretch;padding:14px 12px;gap:14px}.vd-profile-left{align-self:center;flex:0 0 auto}.vd-profile-left img{width:88px;height:88px}.vd-profile-name{text-align:center}.vd-specialties-wrapper{display:none}.vd-skeleton{flex-direction:column;align-items:center;padding:14px 12px}.vd-skeleton-avatar{width:88px;height:88px}}';
 
   var INNER_HTML =
     '<div class="vd-embed-root">' +
@@ -106,48 +103,40 @@
 
   injectStylesOnce();
 
-  function mount(root) {
-    injectStylesOnce();
-    var cmsContainer = document.getElementById('vd-cms-defaults');
-    var cmsCards = cmsContainer
-      ? [].slice.call(cmsContainer.querySelectorAll('.vd-cms-card'))
-      : [];
+  /* ==================== Utilities ==================== */
 
-    if (!root.querySelector('#vd-grid')) {
-      if (!/\bvd-container\b/.test(root.className)) {
-        root.className = root.className ? root.className.trim() + ' vd-container' : 'vd-container';
-      }
-      root.innerHTML = INNER_HTML;
-    }
-
-    var grid = root.querySelector('#vd-grid');
-    if (grid && cmsCards.length) {
-      cmsCards.forEach(function (card) {
-        grid.appendChild(card);
-      });
-      if (cmsContainer) cmsContainer.classList.add('vd-cms-absorbed');
-    }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (m) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+    });
+  }
+  function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
+  function firstName(full) { return (full || '').split(' ')[0] || 'Provider'; }
+  function mainFlagTrue(v) {
+    var s = String(v || '').trim().toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes';
+  }
+  function debounce(fn, ms) {
+    ms = ms || 300;
+    var t;
+    return function () {
+      var a = arguments;
+      clearTimeout(t);
+      t = setTimeout(function () { fn.apply(null, a); }, ms);
+    };
   }
 
+  /* ==================== Config ==================== */
+
   function mergeDirectoryConfig(root) {
-    var out = {
-      apiBase: '',
-      apiKey: '',
-      fixedInsurance: '',
-      fixedSpecialty: '',
-      fixedTag: '',
-      vdMain: '',
-    };
+    var out = { apiBase: '', apiKey: '', fixedInsurance: '', fixedSpecialty: '', fixedTag: '', vdMain: '', headerOffset: '' };
     var chain = [];
     var el = root;
-    for (var i = 0; i < 12 && el && el.nodeType === 1; i++) {
-      chain.push(el);
-      el = el.parentElement;
-    }
-    function pick(getter) {
+    for (var i = 0; i < 12 && el && el.nodeType === 1; i++) { chain.push(el); el = el.parentElement; }
+    function pick(g) {
       for (var j = 0; j < chain.length; j++) {
         var d = chain[j].dataset || {};
-        var v = getter(d);
+        var v = g(d);
         if (v != null && String(v).trim() !== '') return String(v).trim();
       }
       return '';
@@ -180,53 +169,45 @@
   function pathInsuranceSegment() {
     var m = location.pathname.match(/\/insurances?\/([^/?#]+)/i);
     if (!m) return '';
-    try {
-      return decodeURIComponent(m[1] || '').replace(/\+/g, ' ').trim();
-    } catch (e) {
-      return (m[1] || '').trim();
-    }
+    try { return decodeURIComponent(m[1] || '').replace(/\+/g, ' ').trim(); } catch (e) { return (m[1] || '').trim(); }
   }
 
   function slugToInsuranceLabel(slug) {
     if (!slug) return '';
-    return slug
-      .split(/[-_]+/)
-      .filter(Boolean)
-      .map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); })
-      .join(' ');
+    return slug.split(/[-_]+/).filter(Boolean).map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); }).join(' ');
   }
 
-  function mainFlagTrue(v) {
-    var s = String(v || '').trim().toLowerCase();
-    return s === 'true' || s === '1' || s === 'yes';
-  }
+  /* ==================== Main ==================== */
 
   function main() {
     var $root = document.getElementById('vedic-rd-directory');
     if (!$root) return;
 
-    mount($root);
+    if (!$root.querySelector('#vd-grid')) {
+      if (!/\bvd-container\b/.test($root.className)) {
+        $root.className = $root.className ? $root.className.trim() + ' vd-container' : 'vd-container';
+      }
+      $root.innerHTML = INNER_HTML;
+    }
 
     var merged = mergeDirectoryConfig($root);
     $root.style.setProperty('--vd-header-offset', resolveHeaderOffset($root, merged));
-    var forceMain =
-      mainFlagTrue($root.getAttribute('data-vd-main')) || mainFlagTrue(merged.vdMain);
 
+    var forceMain = mainFlagTrue($root.getAttribute('data-vd-main')) || mainFlagTrue(merged.vdMain);
     var pathSeg = pathInsuranceSegment();
     var fromPath = !forceMain && pathSeg ? slugToInsuranceLabel(pathSeg) : '';
     var fixedIns = forceMain ? '' : merged.fixedInsurance || fromPath;
     var fixedSpec = merged.fixedSpecialty;
-    var fixedTagVal = merged.fixedTag;
+    var fixedTag = merged.fixedTag;
 
-    var DEFAULT_API =
-      'https://script.google.com/macros/s/AKfycbxev-lmv8hBefUnj48SMY_B6Hdrzw-UtxF0k-aIxrum5PkRnWeY_QC2hEzKIWm_GqQpcQ/exec';
+    var DEFAULT_API = 'https://script.google.com/macros/s/AKfycbynql_zmBQHn7-iTj2PQhpUCYw8Wbw1SMrYQQHguHhzELt8132Lrxh7VObv037j7mkI/exec';
     var API_BASE = merged.apiBase || DEFAULT_API;
     var API_KEY = merged.apiKey || '';
 
-    var isInsuranceLanding = !!fixedIns;
+    var isInsurance = !!fixedIns;
 
-    $root.classList.toggle('vd-main-mode', !isInsuranceLanding);
-    $root.classList.toggle('vd-insurance-mode', isInsuranceLanding);
+    $root.classList.toggle('vd-main-mode', !isInsurance);
+    $root.classList.toggle('vd-insurance-mode', isInsurance);
 
     var $grid = $root.querySelector('#vd-grid');
     var $count = $root.querySelector('#vd-count');
@@ -237,217 +218,284 @@
 
     if (!$grid || !$accepting) return;
 
-    var cmsDefaultCount = $grid.querySelectorAll('.vd-cms-card').length;
-
-    upgradeCmsCards($grid);
-
-    var ctrlBar = $root.querySelector('.vd-controls');
-    if (isInsuranceLanding) {
+    if (isInsurance) {
+      var ctrlBar = $root.querySelector('.vd-controls');
       if (ctrlBar) ctrlBar.style.display = 'none';
-      if ($search) {
-        $search.setAttribute('tabindex', '-1');
-        $search.setAttribute('aria-hidden', 'true');
-      }
-      if ($accepting) {
-        $accepting.value = 'yes';
-        $accepting.setAttribute('aria-hidden', 'true');
-      }
-    } else {
-      if (ctrlBar) {
-        ctrlBar.style.removeProperty('display');
-        ctrlBar.style.removeProperty('visibility');
-      }
-      if ($search) {
-        $search.style.display = '';
-        $search.style.removeProperty('display');
-        $search.style.visibility = '';
-        $search.removeAttribute('aria-hidden');
-        $search.removeAttribute('tabindex');
-      }
-      if ($accepting) {
-        $accepting.style.removeProperty('display');
-        $accepting.removeAttribute('aria-hidden');
-      }
+      $accepting.value = 'yes';
     }
+
+    /* ---------- State ---------- */
+
+    var allProviders = [];
+    var availCache = {};
+    var pendingAvailCheck = false;
+
+    /* ---------- Query-string helpers ---------- */
 
     function getQS() { return new URLSearchParams(location.search); }
-    function setQS(params) {
-      var next = new URLSearchParams(location.search);
-      Object.entries(params).forEach(function (kv) {
-        if (kv[1] == null || kv[1] === '') next.delete(kv[0]);
-        else next.set(kv[0], kv[1]);
+    function setQS(p) {
+      var n = new URLSearchParams(location.search);
+      Object.keys(p).forEach(function (k) {
+        if (p[k] == null || p[k] === '') n.delete(k); else n.set(k, p[k]);
       });
-      history.replaceState({}, '', location.pathname + '?' + next.toString());
-    }
-    function debounce(fn, ms) {
-      ms = ms || 300;
-      var t;
-      return function () {
-        var args = arguments;
-        clearTimeout(t);
-        t = setTimeout(function () { fn.apply(null, args); }, ms);
-      };
+      history.replaceState({}, '', location.pathname + '?' + n.toString());
     }
 
-    function apiPost(payload) {
-      payload = payload || {};
-      if (API_KEY) payload.key = API_KEY;
-      return fetch(API_BASE, {
-        method: 'POST',
-        credentials: 'omit',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).then(function (res) {
-        if (!res.ok) throw new Error('Network error');
-        return res.json();
+    /* ---------- API ---------- */
+
+    function api(params) {
+      var p = new URLSearchParams(params);
+      if (API_KEY) p.set('key', API_KEY);
+      var url = API_BASE + (API_BASE.indexOf('?') >= 0 ? '&' : '?') + p.toString();
+      return fetch(url, { credentials: 'omit' }).then(function (r) {
+        if (!r.ok) throw new Error('Network error');
+        return r.json();
       });
     }
 
-    function cardId(card) {
-      return (card.getAttribute('data-slug') || card.getAttribute('data-id') || '').trim();
-    }
+    /* ---------- Skeletons ---------- */
 
-    function listMatch(attrName, fixedVal, card) {
-      if (!fixedVal) return true;
-      var raw = (card.getAttribute(attrName) || '').trim().toLowerCase();
-      if (!raw) return true;
-      var want = String(fixedVal).trim().toLowerCase();
-      return raw.split(',').some(function (s) {
-        return s.trim() === want;
-      });
-    }
-
-    /** Sheet-equivalent: FALSE = never list; DEFAULT (editorial) always lists regardless. */
-    function passesDirectoryListing(card) {
-      if (mainFlagTrue(card.getAttribute('data-vd-default'))) return true;
-      var v = (card.getAttribute('data-vd-in-directory') || '').trim().toLowerCase();
-      if (v === 'false' || v === '0' || v === 'no') return false;
-      return true;
-    }
-
-    function passesStaticFilters(card) {
-      if (!passesDirectoryListing(card)) return false;
-      var q = ($search && $search.value ? $search.value : '').trim().toLowerCase();
-      if (q) {
-        var nameEl = card.querySelector('.vd-profile-name');
-        var name = ((nameEl && nameEl.textContent) || card.getAttribute('data-name') || '').trim().toLowerCase();
-        if (name.indexOf(q) < 0) return false;
+    function showSkeletons() {
+      var html = '';
+      for (var i = 0; i < SKELETON_COUNT; i++) {
+        html +=
+          '<div class="vd-skeleton" aria-hidden="true">' +
+          '<div class="vd-skeleton-avatar"></div>' +
+          '<div class="vd-skeleton-lines">' +
+          '<div class="vd-skeleton-line"></div><div class="vd-skeleton-line"></div>' +
+          '<div class="vd-skeleton-line"></div><div class="vd-skeleton-line"></div>' +
+          '</div></div>';
       }
-      var insVal = fixedIns || ($insurance && $insurance.value) || '';
-      if (insVal && !listMatch('data-vd-insurances', insVal, card)) return false;
-      if (fixedSpec && !listMatch('data-vd-specialties', fixedSpec, card)) return false;
-      if (fixedTagVal && !listMatch('data-vd-tags', fixedTagVal, card)) return false;
-      return true;
+      $grid.innerHTML = html;
+      $count.textContent = '';
+      $status.textContent = '';
     }
 
-    function batchCheckAvailabilityFromCards(cards) {
-      var providers = [];
-      cards.forEach(function (card) {
-        if (mainFlagTrue(card.getAttribute('data-vd-default'))) return;
-        var id = cardId(card);
-        var cal = (card.getAttribute('data-calendar-id') || card.getAttribute('data-calendar') || '').trim();
-        var email = (card.getAttribute('data-email') || '').trim();
-        var tz = (card.getAttribute('data-tz') || '').trim() || 'America/Chicago';
-        var st = (card.getAttribute('data-start-time') || '').trim() || '9:00 AM';
-        var et = (card.getAttribute('data-end-time') || '').trim() || '7:00 PM';
-        if (!id) return;
-        if (!cal && !email) return;
-        providers.push({
-          id: id,
-          calendarId: cal,
-          email: email,
-          tz: tz,
-          startTime: st,
-          endTime: et,
-        });
+    /* ---------- Card HTML ---------- */
+
+    function cardHtml(p, checking) {
+      var slug = String(p.slug || '').trim();
+      var href = slug ? BOOK_PATH + '/' + encodeURIComponent(slug) : '#';
+      var cls = 'vd-profile-card vd-card-reveal' + (checking ? ' vd-card-checking' : '');
+      var specs = (p.specialties || []).map(escapeHtml);
+      var vis = specs.slice(0, 3);
+      var hid = specs.slice(3);
+      var tags = (p.tags || []).map(escapeHtml);
+      var ins = (p.insurances || []).map(escapeHtml);
+
+      var tagsHtml = tags.length
+        ? '<div class="vd-tags-wrapper"><div class="vd-tags">' +
+          tags.map(function (t) { return '<span class="vd-tag-pill">' + t + '</span>'; }).join('') +
+          '</div></div>' : '';
+
+      var bioSafe = escapeHtml(p.bio || '');
+      var bioHtml = bioSafe
+        ? '<div class="vd-bio"><div class="vd-bio-text">' + bioSafe +
+          '</div><button type="button" class="vd-bio-toggle">View more</button></div>' : '';
+
+      var visSpec = vis.map(function (s) { return '<span class="vd-specialty-tag">' + s + '</span>'; }).join('');
+      var hidSpec = hid.map(function (s) { return '<span class="vd-specialty-tag">' + s + '</span>'; }).join('');
+      var moreSpec = hid.length
+        ? '<span class="vd-hidden-spec">' + hidSpec + '</span><button type="button" class="vd-more-spec">+More</button>' : '';
+
+      return (
+        '<div class="' + cls + '" data-pid="' + escapeAttr(p.id || '') + '" data-status="' + escapeAttr(p.profileStatusRaw || '') + '">' +
+        '<div class="vd-profile-left"><img src="' + escapeAttr(p.photoUrl || '') +
+        '" alt="' + escapeAttr(p.name || 'Dietitian') + '" loading="lazy"></div>' +
+        '<div class="vd-profile-right">' +
+        '<div class="vd-profile-name">' + escapeHtml(p.name || '') +
+        (p.credentials ? ', ' + escapeHtml(p.credentials) : '') + '</div>' +
+        '<div class="vd-line"><strong>Insurances:</strong> ' + (ins.length ? ins.join(', ') : 'N/A') + '</div>' +
+        tagsHtml + bioHtml +
+        '<div class="vd-specialties-wrapper"><span class="vd-specialties-label">Specialties:</span>' +
+        '<div class="vd-specialties">' + visSpec + moreSpec + '</div></div>' +
+        '<div class="vd-actions"><a class="vd-btn" href="' + escapeAttr(href) +
+        '" target="_self">Book with ' + escapeHtml(firstName(p.name)) + '</a></div>' +
+        '</div></div>'
+      );
+    }
+
+    /* ---------- Sorting ---------- */
+
+    function sortDefaults(list) {
+      return list.slice().sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+    }
+
+    function sortNonDefaults(list) {
+      return list.slice().sort(function (a, b) {
+        var ra = (typeof a.profileRank === 'number' && a.profileRank > 0) ? a.profileRank : 999;
+        var rb = (typeof b.profileRank === 'number' && b.profileRank > 0) ? b.profileRank : 999;
+        return (ra - rb) || (a.name || '').localeCompare(b.name || '');
       });
-      if (!providers.length) return Promise.resolve({});
-      return apiPost({
-        mode: 'availabilityBatch',
-        days: SLOT_WINDOW_DAYS,
-        providers: providers,
-      })
-        .then(function (data) {
-          if (!data || !data.ok) throw new Error((data && data.error) || 'Availability failed');
-          return data.availability || {};
-        })
-        .catch(function (err) {
-          console.error(err);
-          return {};
-        });
     }
 
-    function countVisibleCards() {
-      return $grid.querySelectorAll('.vd-cms-card:not(.vd-card-hidden)').length;
+    /* ---------- Filtering (client-side, main page only) ---------- */
+
+    function matchInsurance(p, ins) {
+      if (!ins) return true;
+      var want = ins.toLowerCase();
+      return (p.insurances || []).some(function (x) { return x.toLowerCase() === want; });
     }
 
-    function setCountLabel(acceptingYes) {
-      var n = countVisibleCards();
-      if (!n) {
-        $count.textContent = '0 dietitians';
-        return;
-      }
-      if (acceptingYes) {
-        $count.textContent =
-          n + ' dietitian' + (n !== 1 ? 's' : '') + ' with openings soon';
+    function matchSearch(p, q) {
+      if (!q) return true;
+      var lc = q.toLowerCase();
+      return (p.name || '').toLowerCase().indexOf(lc) >= 0 ||
+             (p.bio || '').toLowerCase().indexOf(lc) >= 0 ||
+             (p.specialties || []).join(',').toLowerCase().indexOf(lc) >= 0;
+    }
+
+    function applyFilters(providers) {
+      var q = ($search && !isInsurance) ? ($search.value || '').trim() : '';
+      var ins = isInsurance ? '' : ($insurance ? $insurance.value : '');
+
+      return providers.filter(function (p) {
+        if (!matchSearch(p, q)) return false;
+        if (ins && !matchInsurance(p, ins)) return false;
+        return true;
+      });
+    }
+
+    /* ---------- Render ---------- */
+
+    function renderAll() {
+      var acceptYes = isInsurance || $accepting.value === 'yes';
+      var filtered;
+
+      if (isInsurance) {
+        filtered = allProviders;
       } else {
-        $count.textContent = n + ' dietitian' + (n !== 1 ? 's' : '') + ' found';
-      }
-    }
-
-    function refreshDirectory() {
-      var acceptingYes = isInsuranceLanding || $accepting.value === 'yes';
-      var cards = [].slice.call($grid.querySelectorAll('.vd-cms-card'));
-
-      cards.forEach(function (card) {
-        card.classList.remove('vd-card-hidden');
-      });
-
-      cards.forEach(function (card) {
-        if (!passesStaticFilters(card)) card.classList.add('vd-card-hidden');
-      });
-
-      if (!acceptingYes) {
-        setCountLabel(false);
-        $status.textContent = '';
-        return;
+        filtered = applyFilters(allProviders);
       }
 
-      var toCheck = cards.filter(function (card) {
-        if (card.classList.contains('vd-card-hidden')) return false;
-        if (mainFlagTrue(card.getAttribute('data-vd-default'))) return false;
-        var cal = (card.getAttribute('data-calendar-id') || card.getAttribute('data-calendar') || card.getAttribute('data-email') || '').trim();
-        return !!cal;
+      var defaults = [];
+      var nonDefaults = [];
+      filtered.forEach(function (p) {
+        if ((p.profileStatusRaw || '').toUpperCase() === 'DEFAULT') defaults.push(p);
+        else nonDefaults.push(p);
       });
 
-      if (!toCheck.length) {
-        setCountLabel(true);
-        $status.textContent = '';
-        return;
-      }
+      defaults = sortDefaults(defaults);
+      nonDefaults = sortNonDefaults(nonDefaults);
 
-      $status.innerHTML =
-        '<span class="vd-api-loading" aria-hidden="true"></span>Checking openings\u2026';
+      var html = '';
 
-      batchCheckAvailabilityFromCards(toCheck).then(function (avail) {
-        cards.forEach(function (card) {
-          if (card.classList.contains('vd-card-hidden')) return;
-          if (mainFlagTrue(card.getAttribute('data-vd-default'))) return;
-          var cal = (card.getAttribute('data-calendar-id') || card.getAttribute('data-calendar') || card.getAttribute('data-email') || '').trim();
-          if (!cal) {
-            card.classList.add('vd-card-hidden');
-            return;
+      defaults.forEach(function (p) { html += cardHtml(p, false); });
+
+      nonDefaults.forEach(function (p) {
+        if (acceptYes) {
+          if (availCache[p.id] === true) {
+            html += cardHtml(p, false);
+          } else if (availCache[p.id] === false) {
+            /* no openings — omit */
+          } else {
+            html += cardHtml(p, true);
           }
-          var id = cardId(card);
-          if (!avail[id]) card.classList.add('vd-card-hidden');
+        } else {
+          html += cardHtml(p, false);
+        }
+      });
+
+      $grid.innerHTML = html;
+
+      var visibleCount = $grid.querySelectorAll('.vd-profile-card').length;
+      if (acceptYes) {
+        var stillChecking = $grid.querySelectorAll('.vd-card-checking').length;
+        if (stillChecking) {
+          $count.textContent = (visibleCount - stillChecking) + '+ dietitian' +
+            ((visibleCount - stillChecking) !== 1 ? 's' : '') + ' with openings soon';
+        } else {
+          $count.textContent = visibleCount + ' dietitian' + (visibleCount !== 1 ? 's' : '') + ' with openings soon';
+          $status.textContent = visibleCount ? '' : 'No providers are currently accepting new clients.';
+        }
+      } else {
+        $count.textContent = visibleCount + ' dietitian' + (visibleCount !== 1 ? 's' : '') + ' found';
+        $status.textContent = visibleCount ? '' : 'No matching providers.';
+      }
+
+      if (acceptYes) {
+        var unchecked = nonDefaults.filter(function (p) { return availCache[p.id] === undefined; });
+        if (unchecked.length) checkAvailability(unchecked);
+      }
+    }
+
+    /* ---------- Availability ---------- */
+
+    function checkAvailability(list) {
+      var ids = list.map(function (p) { return p.id; }).filter(Boolean);
+      if (!ids.length) return;
+
+      pendingAvailCheck = true;
+      api({
+        mode: 'availability',
+        ids: ids.join(','),
+        days: String(SLOT_WINDOW_DAYS)
+      }).then(function (data) {
+        if (!data || !data.ok) throw new Error((data && data.error) || 'Availability error');
+        var avail = data.availability || {};
+        ids.forEach(function (id) {
+          availCache[id] = !!avail[id];
         });
-        setCountLabel(true);
-        var vis = countVisibleCards();
-        $status.textContent = vis
-          ? ''
-          : 'No providers are currently accepting new clients.';
+      }).catch(function (err) {
+        console.error('[vd-directory] availability error:', err);
+        ids.forEach(function (id) {
+          if (availCache[id] === undefined) availCache[id] = false;
+        });
+      }).then(function () {
+        pendingAvailCheck = false;
+        renderAll();
       });
     }
+
+    /* ---------- Facets (main page only) ---------- */
+
+    function loadFacets() {
+      if (isInsurance || !$insurance) return Promise.resolve();
+      return api({ mode: 'facets' }).then(function (data) {
+        if (!data.ok) return;
+        var list = data.facets && data.facets.insurances ? data.facets.insurances : [];
+        var cur = getQS().get('insurance') || '';
+        var frag = document.createDocumentFragment();
+        var base = document.createElement('option');
+        base.value = '';
+        base.textContent = 'All insurances';
+        frag.appendChild(base);
+        list.forEach(function (v) {
+          var opt = document.createElement('option');
+          opt.value = v;
+          opt.textContent = v;
+          if (v === cur) opt.selected = true;
+          frag.appendChild(opt);
+        });
+        $insurance.innerHTML = '';
+        $insurance.appendChild(frag);
+      }).catch(function () {});
+    }
+
+    /* ---------- Load providers ---------- */
+
+    function loadProviders() {
+      var params = {
+        mode: 'providers',
+        surface: 'profile',
+        activeOnly: 'true',
+        sort: 'name',
+        limit: '500'
+      };
+      if (isInsurance && fixedIns) {
+        params.insurance = fixedIns;
+        params.mergeDefaultProfiles = 'true';
+      }
+      if (fixedSpec) params.specialty = fixedSpec;
+      if (fixedTag) params.tag = fixedTag;
+
+      return api(params).then(function (data) {
+        if (!data.ok) throw new Error(data.error || 'Load failed');
+        allProviders = data.providers || [];
+      });
+    }
+
+    /* ---------- Event delegation for card interactivity ---------- */
 
     $grid.addEventListener('click', function (e) {
       var t = e.target;
@@ -458,82 +506,52 @@
         t.textContent = expanded ? 'View less' : 'View more';
       }
       if (t.classList.contains('vd-more-spec')) {
-        var hid = t.previousElementSibling;
-        if (hid && hid.classList.contains('vd-hidden-spec')) {
-          var show = hid.classList.toggle('vd-show');
+        var hidden = t.previousElementSibling;
+        if (hidden && hidden.classList.contains('vd-hidden-spec')) {
+          var show = hidden.classList.toggle('vd-show');
           t.textContent = show ? 'Less' : '+More';
         }
       }
     });
 
-    if ($search) $search.value = getQS().get('q') || '';
-    if (!isInsuranceLanding) {
-      $accepting.value = getQS().get('accepting') || 'yes';
-    } else {
-      $accepting.value = 'yes';
-    }
-    if (!isInsuranceLanding) {
-      var i = getQS().get('insurance') || '';
-      if (i && $insurance) $insurance.value = i;
-    }
+    /* ---------- Init ---------- */
 
-    if (cmsDefaultCount === 0) {
-      $count.textContent = '';
-      $status.textContent = 'Add dietitians in Webflow CMS (Collection List #vd-cms-defaults).';
-    } else {
-      refreshDirectory();
-    }
+    if (!isInsurance && $search) $search.value = getQS().get('q') || '';
+    if (!isInsurance) $accepting.value = getQS().get('accepting') || 'yes';
 
-    if ($search) {
-      $search.addEventListener(
-        'input',
-        debounce(function () {
-          setQS({ q: $search.value });
-          refreshDirectory();
-        }, 350)
-      );
+    showSkeletons();
+
+    var ready = [loadProviders()];
+    if (!isInsurance) ready.push(loadFacets());
+
+    Promise.all(ready).then(function () {
+      renderAll();
+    }).catch(function (err) {
+      $grid.innerHTML = '';
+      $status.textContent = 'Error loading directory.';
+      console.error('[vd-directory]', err);
+    });
+
+    /* ---------- Controls ---------- */
+
+    if ($search && !isInsurance) {
+      $search.addEventListener('input', debounce(function () {
+        setQS({ q: $search.value });
+        renderAll();
+      }, 350));
     }
-    if (!isInsuranceLanding && $insurance) {
+    if ($insurance && !isInsurance) {
       $insurance.addEventListener('change', function () {
         setQS({ insurance: $insurance.value });
-        refreshDirectory();
+        renderAll();
       });
     }
-    if (!isInsuranceLanding) {
+    if (!isInsurance) {
       $accepting.addEventListener('change', function () {
         setQS({ accepting: $accepting.value });
-        refreshDirectory();
+        renderAll();
       });
     }
-  }
-
-  function upgradeCmsCards(grid) {
-    [].slice.call(grid.querySelectorAll('.vd-cms-card')).forEach(function (card) {
-      var btn = card.querySelector('.vd-btn');
-      if (btn) {
-        var name = (card.getAttribute('data-name') || '').trim();
-        if (name) btn.textContent = 'Book with ' + name.split(' ')[0];
-      }
-
-      var specsWrap = card.querySelector('.vd-cms-specs');
-      if (specsWrap) {
-        var items = [].slice.call(specsWrap.querySelectorAll('li'));
-        if (items.length > 3) {
-          items.slice(3).forEach(function (li) { li.style.display = 'none'; li.classList.add('vd-cms-hidden-spec'); });
-          var moreBtn = document.createElement('button');
-          moreBtn.type = 'button';
-          moreBtn.className = 'vd-more-spec';
-          moreBtn.textContent = '+More';
-          moreBtn.addEventListener('click', function () {
-            var hidden = specsWrap.querySelectorAll('.vd-cms-hidden-spec');
-            var showing = hidden.length && hidden[0].style.display !== 'none' ? false : true;
-            [].slice.call(hidden).forEach(function (li) { li.style.display = showing ? '' : 'none'; });
-            moreBtn.textContent = showing ? 'Less' : '+More';
-          });
-          specsWrap.appendChild(moreBtn);
-        }
-      }
-    });
   }
 
   if (document.readyState === 'loading') {
