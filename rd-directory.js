@@ -12,7 +12,10 @@
  *
  * Embeds:
  *   Main page:     data-vd-main="true"
- *   Insurance SEO: data-fixed-insurance="Anthem"  (or URL /insurance/anthem)
+ *   SEO landings (no search bar; accepting=yes; DEFAULT always on top, merge if no match):
+ *     Insurance:  data-fixed-insurance="Anthem"  or URL /insurance/anthem
+ *     Condition:  data-fixed-condition="GLP-1"   or URL /condition/glp-1  (plural /conditions/… also)
+ *     Location:   data-fixed-location="Austin"   or URL /location/austin  (plural /locations/… also)
  */
 (function () {
   'use strict';
@@ -28,8 +31,8 @@
     '.vd-controls{max-width:1100px;margin:16px auto 12px;padding:16px 20px;border:1px solid var(--vd-border);border-radius:12px;background:var(--vd-card);box-shadow:var(--vd-shadow);display:flex;flex-wrap:wrap;gap:.75rem;align-items:stretch;box-sizing:border-box}' +
     '@media screen and (max-width:991px){.vd-controls{flex-direction:column;align-items:stretch;gap:.65rem;padding:14px 16px}.vd-controls #vd-search,.vd-controls select{flex:1 1 auto!important;width:100%!important;max-width:100%!important;min-width:0!important}}' +
     '#vedic-rd-directory.vd-main-mode .vd-controls{display:flex!important;flex-wrap:wrap!important;visibility:visible!important;opacity:1!important;min-height:0}' +
-    '#vedic-rd-directory.vd-insurance-mode .vd-controls{display:none!important}' +
-    '#vedic-rd-directory.vd-insurance-mode .vd-count--loading{margin-top:4px}' +
+    '#vedic-rd-directory.vd-fixed-landing-mode .vd-controls,#vedic-rd-directory.vd-insurance-mode .vd-controls{display:none!important}' +
+    '#vedic-rd-directory.vd-fixed-landing-mode .vd-count--loading,#vedic-rd-directory.vd-insurance-mode .vd-count--loading{margin-top:4px}' +
     '#vedic-rd-directory input.vd-search-input,#vedic-rd-directory #vd-search{display:block!important;visibility:visible!important;opacity:1!important;-webkit-appearance:none;appearance:none;box-sizing:border-box;min-height:44px!important;flex:1 1 220px;max-width:100%;width:auto!important;min-width:120px!important;border:1px solid var(--vd-border);border-radius:8px;padding:10px 14px;font-size:15px!important;line-height:1.3!important;color:var(--vd-text)!important;background:#fff!important}' +
     '#vedic-rd-directory input.vd-search-input::placeholder,#vedic-rd-directory #vd-search::placeholder{color:var(--vd-muted)}' +
     '.vd-controls select{border:1px solid var(--vd-border);border-radius:8px;padding:10px 14px;font-size:15px;flex:1 1 180px;min-height:44px;background:#fff;color:var(--vd-text);box-sizing:border-box}' +
@@ -135,7 +138,7 @@
   /* ==================== Config ==================== */
 
   function mergeDirectoryConfig(root) {
-    var out = { apiBase: '', apiKey: '', fixedInsurance: '', fixedSpecialty: '', fixedTag: '', vdMain: '', headerOffset: '' };
+    var out = { apiBase: '', apiKey: '', fixedInsurance: '', fixedCondition: '', fixedLocation: '', fixedSpecialty: '', fixedTag: '', vdMain: '', headerOffset: '' };
     var chain = [];
     var el = root;
     for (var i = 0; i < 12 && el && el.nodeType === 1; i++) { chain.push(el); el = el.parentElement; }
@@ -150,6 +153,8 @@
     out.apiBase = pick(function (d) { return d.apiBase; });
     out.apiKey = pick(function (d) { return d.apiKey; });
     out.fixedInsurance = pick(function (d) { return d.fixedInsurance; });
+    out.fixedCondition = pick(function (d) { return d.fixedCondition; });
+    out.fixedLocation = pick(function (d) { return d.fixedLocation; });
     out.fixedSpecialty = pick(function (d) { return d.fixedSpecialty; });
     out.fixedTag = pick(function (d) { return d.fixedTag; });
     out.vdMain = pick(function (d) { return d.vdMain; });
@@ -172,13 +177,26 @@
     return '88px';
   }
 
-  function pathInsuranceSegment() {
-    var m = location.pathname.match(/\/insurances?\/([^/?#]+)/i);
+  function pathSlugSegment(regex) {
+    var m = location.pathname.match(regex);
     if (!m) return '';
     try { return decodeURIComponent(m[1] || '').replace(/\+/g, ' ').trim(); } catch (e) { return (m[1] || '').trim(); }
   }
 
-  function slugToInsuranceLabel(slug) {
+  function pathInsuranceSlug() {
+    return pathSlugSegment(/\/insurances?\/([^/?#]+)/i);
+  }
+
+  function pathConditionSlug() {
+    return pathSlugSegment(/\/conditions?\/([^/?#]+)/i);
+  }
+
+  function pathLocationSlug() {
+    return pathSlugSegment(/\/locations?\/([^/?#]+)/i);
+  }
+
+  /** Turn URL slug (e.g. glp-1-support) into a display string; may not match sheet tokens — prefer data-fixed-* with exact sheet names. */
+  function slugToDisplayLabel(slug) {
     if (!slug) return '';
     return slug.split(/[-_]+/).filter(Boolean).map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); }).join(' ');
   }
@@ -200,9 +218,15 @@
     $root.style.setProperty('--vd-header-offset', resolveHeaderOffset($root, merged));
 
     var forceMain = mainFlagTrue($root.getAttribute('data-vd-main')) || mainFlagTrue(merged.vdMain);
-    var pathSeg = pathInsuranceSegment();
-    var fromPath = !forceMain && pathSeg ? slugToInsuranceLabel(pathSeg) : '';
-    var fixedIns = forceMain ? '' : merged.fixedInsurance || fromPath;
+    var insSlug = pathInsuranceSlug();
+    var condSlug = pathConditionSlug();
+    var locSlug = pathLocationSlug();
+    var fromPathIns = !forceMain && insSlug ? slugToDisplayLabel(insSlug) : '';
+    var fromPathCond = !forceMain && condSlug ? slugToDisplayLabel(condSlug) : '';
+    var fromPathLoc = !forceMain && locSlug ? slugToDisplayLabel(locSlug) : '';
+    var fixedIns = forceMain ? '' : merged.fixedInsurance || fromPathIns;
+    var fixedCond = forceMain ? '' : merged.fixedCondition || fromPathCond;
+    var fixedLoc = forceMain ? '' : merged.fixedLocation || fromPathLoc;
     var fixedSpec = merged.fixedSpecialty;
     var fixedTag = merged.fixedTag;
 
@@ -210,10 +234,11 @@
     var API_BASE = merged.apiBase || DEFAULT_API;
     var API_KEY = merged.apiKey || '';
 
-    var isInsurance = !!fixedIns;
+    var isFixedLanding = !!(fixedIns || fixedCond || fixedLoc);
 
-    $root.classList.toggle('vd-main-mode', !isInsurance);
-    $root.classList.toggle('vd-insurance-mode', isInsurance);
+    $root.classList.toggle('vd-main-mode', !isFixedLanding);
+    $root.classList.toggle('vd-fixed-landing-mode', isFixedLanding);
+    $root.classList.toggle('vd-insurance-mode', isFixedLanding);
 
     var $grid = $root.querySelector('#vd-grid');
     var $count = $root.querySelector('#vd-count');
@@ -224,7 +249,7 @@
 
     if (!$grid || !$accepting) return;
 
-    if (isInsurance) {
+    if (isFixedLanding) {
       var ctrlBar = $root.querySelector('.vd-controls');
       if (ctrlBar) ctrlBar.style.display = 'none';
       $accepting.value = 'yes';
@@ -236,15 +261,15 @@
     var availCache = {};
     var pendingAvailCheck = false;
     var providersReady = false;
-    var facetsReady = !!isInsurance;
+    var facetsReady = !!isFixedLanding;
 
     /* ---------- Top status (conversion copy + spinner until APIs settle) ---------- */
 
     function updateTopLine() {
-      var acceptYes = isInsurance || $accepting.value === 'yes';
+      var acceptYes = isFixedLanding || $accepting.value === 'yes';
       var loading = !providersReady || !facetsReady;
       if (!loading && acceptYes) {
-        var filtered = isInsurance ? allProviders : applyFilters(allProviders);
+        var filtered = isFixedLanding ? allProviders : applyFilters(allProviders);
         var needAvail = false;
         for (var ti = 0; ti < filtered.length; ti++) {
           var tp = filtered[ti];
@@ -321,6 +346,8 @@
       var hid = specs.slice(3);
       var tags = (p.tags || []).map(escapeHtml);
       var ins = (p.insurances || []).map(escapeHtml);
+      var conds = (p.conditions || []).map(escapeHtml);
+      var locs = (p.locations || []).map(escapeHtml);
 
       var tagsHtml = tags.length
         ? '<div class="vd-tags-wrapper"><div class="vd-tags">' +
@@ -337,6 +364,13 @@
       var moreSpec = hid.length
         ? '<span class="vd-hidden-spec">' + hidSpec + '</span><button type="button" class="vd-more-spec">+More</button>' : '';
 
+      var condLine = conds.length
+        ? '<div class="vd-line"><strong>Conditions:</strong> ' + conds.join(', ') + '</div>'
+        : '';
+      var locLine = locs.length
+        ? '<div class="vd-line"><strong>Locations:</strong> ' + locs.join(', ') + '</div>'
+        : '';
+
       return (
         '<div class="' + cls + '" data-pid="' + escapeAttr(p.id || '') + '" data-status="' + escapeAttr(p.profileStatusRaw || '') + '">' +
         '<div class="vd-profile-left"><img src="' + escapeAttr(p.photoUrl || '') +
@@ -345,6 +379,7 @@
         '<div class="vd-profile-name">' + escapeHtml(p.name || '') +
         (p.credentials ? ', ' + escapeHtml(p.credentials) : '') + '</div>' +
         '<div class="vd-line"><strong>Insurances:</strong> ' + (ins.length ? ins.join(', ') : 'N/A') + '</div>' +
+        condLine + locLine +
         tagsHtml + bioHtml +
         '<div class="vd-specialties-wrapper"><span class="vd-specialties-label">Specialties:</span>' +
         '<div class="vd-specialties">' + visSpec + moreSpec + '</div></div>' +
@@ -385,8 +420,8 @@
     }
 
     function applyFilters(providers) {
-      var q = ($search && !isInsurance) ? ($search.value || '').trim() : '';
-      var ins = isInsurance ? '' : ($insurance ? $insurance.value : '');
+      var q = ($search && !isFixedLanding) ? ($search.value || '').trim() : '';
+      var ins = isFixedLanding ? '' : ($insurance ? $insurance.value : '');
 
       return providers.filter(function (p) {
         if (!matchSearch(p, q)) return false;
@@ -398,10 +433,10 @@
     /* ---------- Render ---------- */
 
     function renderAll() {
-      var acceptYes = isInsurance || $accepting.value === 'yes';
+      var acceptYes = isFixedLanding || $accepting.value === 'yes';
       var filtered;
 
-      if (isInsurance) {
+      if (isFixedLanding) {
         filtered = allProviders;
       } else {
         filtered = applyFilters(allProviders);
@@ -484,7 +519,7 @@
     /* ---------- Facets (main page only) ---------- */
 
     function loadFacets() {
-      if (isInsurance || !$insurance) return Promise.resolve();
+      if (isFixedLanding || !$insurance) return Promise.resolve();
       return api({ mode: 'facets' }).then(function (data) {
         if (!data.ok) return;
         var list = data.facets && data.facets.insurances ? data.facets.insurances : [];
@@ -516,9 +551,11 @@
         sort: 'name',
         limit: '500'
       };
-      if (isInsurance && fixedIns) {
-        params.insurance = fixedIns;
-        params.mergeDefaultProfiles = 'true';
+      if (isFixedLanding) {
+        if (fixedIns) params.insurance = fixedIns;
+        if (fixedCond) params.condition = fixedCond;
+        if (fixedLoc) params.location = fixedLoc;
+        if (fixedIns || fixedCond || fixedLoc) params.mergeDefaultProfiles = 'true';
       }
       if (fixedSpec) params.specialty = fixedSpec;
       if (fixedTag) params.tag = fixedTag;
@@ -550,21 +587,21 @@
 
     /* ---------- Init ---------- */
 
-    if (!isInsurance && $search) $search.value = getQS().get('q') || '';
-    if (!isInsurance) $accepting.value = getQS().get('accepting') || 'yes';
+    if (!isFixedLanding && $search) $search.value = getQS().get('q') || '';
+    if (!isFixedLanding) $accepting.value = getQS().get('accepting') || 'yes';
 
     showSkeletons();
 
     var ready = [loadProviders()];
-    if (!isInsurance) ready.push(loadFacets());
+    if (!isFixedLanding) ready.push(loadFacets());
 
     Promise.all(ready).then(function () {
       providersReady = true;
-      if (!isInsurance) facetsReady = true;
+      if (!isFixedLanding) facetsReady = true;
       renderAll();
     }).catch(function (err) {
       providersReady = true;
-      if (!isInsurance) facetsReady = true;
+      if (!isFixedLanding) facetsReady = true;
       $grid.innerHTML = '';
       $count.className = 'vd-count';
       $count.innerHTML = '';
@@ -575,19 +612,19 @@
 
     /* ---------- Controls ---------- */
 
-    if ($search && !isInsurance) {
+    if ($search && !isFixedLanding) {
       $search.addEventListener('input', debounce(function () {
         setQS({ q: $search.value });
         renderAll();
       }, 350));
     }
-    if ($insurance && !isInsurance) {
+    if ($insurance && !isFixedLanding) {
       $insurance.addEventListener('change', function () {
         setQS({ insurance: $insurance.value });
         renderAll();
       });
     }
-    if (!isInsurance) {
+    if (!isFixedLanding) {
       $accepting.addEventListener('change', function () {
         setQS({ accepting: $accepting.value });
         renderAll();
