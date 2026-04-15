@@ -346,8 +346,6 @@
       var hid = specs.slice(3);
       var tags = (p.tags || []).map(escapeHtml);
       var ins = (p.insurances || []).map(escapeHtml);
-      var conds = (p.conditions || []).map(escapeHtml);
-      var locs = (p.locations || []).map(escapeHtml);
 
       var tagsHtml = tags.length
         ? '<div class="vd-tags-wrapper"><div class="vd-tags">' +
@@ -364,13 +362,6 @@
       var moreSpec = hid.length
         ? '<span class="vd-hidden-spec">' + hidSpec + '</span><button type="button" class="vd-more-spec">+More</button>' : '';
 
-      var condLine = conds.length
-        ? '<div class="vd-line"><strong>Conditions:</strong> ' + conds.join(', ') + '</div>'
-        : '';
-      var locLine = locs.length
-        ? '<div class="vd-line"><strong>Locations:</strong> ' + locs.join(', ') + '</div>'
-        : '';
-
       return (
         '<div class="' + cls + '" data-pid="' + escapeAttr(p.id || '') + '" data-status="' + escapeAttr(p.profileStatusRaw || '') + '">' +
         '<div class="vd-profile-left"><img src="' + escapeAttr(p.photoUrl || '') +
@@ -379,7 +370,6 @@
         '<div class="vd-profile-name">' + escapeHtml(p.name || '') +
         (p.credentials ? ', ' + escapeHtml(p.credentials) : '') + '</div>' +
         '<div class="vd-line"><strong>Insurances:</strong> ' + (ins.length ? ins.join(', ') : 'N/A') + '</div>' +
-        condLine + locLine +
         tagsHtml + bioHtml +
         '<div class="vd-specialties-wrapper"><span class="vd-specialties-label">Specialties:</span>' +
         '<div class="vd-specialties">' + visSpec + moreSpec + '</div></div>' +
